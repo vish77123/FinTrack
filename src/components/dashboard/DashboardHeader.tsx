@@ -10,7 +10,7 @@ interface DashboardHeaderProps {
 }
 
 export default function DashboardHeader({ userName }: DashboardHeaderProps) {
-  const { theme, toggleTheme } = useUIStore();
+  const { theme, toggleTheme, setTransactionModalOpen } = useUIStore();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -31,7 +31,7 @@ export default function DashboardHeader({ userName }: DashboardHeaderProps) {
         <p>Here&apos;s your financial overview for {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
       </div>
       <div className={styles.headerActions}>
-        <button className="btn btn-primary">
+        <button className="btn btn-primary" onClick={() => setTransactionModalOpen(true)}>
           <Plus size={16} /> Add Transaction
         </button>
         <button

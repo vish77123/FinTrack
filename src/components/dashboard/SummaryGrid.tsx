@@ -1,10 +1,17 @@
-import { TrendingUp, TrendingDown, Target, Wallet } from "lucide-react";
+import { TrendingUp, TrendingDown } from "lucide-react";
 import styles from "./dashboard.module.css";
-import { mockData } from "@/lib/mockData";
 
-export default function SummaryGrid() {
+interface SummaryGridProps {
+  netWorth: number;
+  income: number;
+  expenses: number;
+  savings: number;
+  currency: string;
+}
+
+export default function SummaryGrid({ netWorth, income, expenses, savings, currency }: SummaryGridProps) {
   const formatCurrency = (amount: number) => {
-    return `${mockData.currency}${amount.toLocaleString("en-IN", {
+    return `${currency}${amount.toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     })}`;
   };
@@ -13,7 +20,7 @@ export default function SummaryGrid() {
     <div className={styles.summaryGrid}>
       <div className={`${styles.summaryCard} ${styles.primary}`}>
         <div className={styles.label}>Total Net Worth</div>
-        <div className={styles.amount}>{formatCurrency(mockData.netWorth)}</div>
+        <div className={styles.amount}>{formatCurrency(netWorth)}</div>
         <div className={`${styles.trend} ${styles.positive}`}>
           <div className={styles.trendIcon}>
             <TrendingUp size={10} color="var(--success)" />
@@ -24,7 +31,7 @@ export default function SummaryGrid() {
 
       <div className={styles.summaryCard}>
         <div className={styles.label}>Income</div>
-        <div className={styles.amount}>{formatCurrency(mockData.income)}</div>
+        <div className={styles.amount}>{formatCurrency(income)}</div>
         <div className={`${styles.trend} ${styles.positive}`}>
           <div className={styles.trendIcon}>
             <TrendingUp size={10} color="var(--success)" />
@@ -35,7 +42,7 @@ export default function SummaryGrid() {
 
       <div className={styles.summaryCard}>
         <div className={styles.label}>Expenses</div>
-        <div className={styles.amount}>{formatCurrency(mockData.expenses)}</div>
+        <div className={styles.amount}>{formatCurrency(expenses)}</div>
         <div className={`${styles.trend} ${styles.negative}`}>
           <div className={styles.trendIcon}>
             <TrendingDown size={10} color="var(--danger)" />
@@ -46,7 +53,7 @@ export default function SummaryGrid() {
 
       <div className={styles.summaryCard}>
         <div className={styles.label}>Total Savings</div>
-        <div className={styles.amount}>{formatCurrency(mockData.savings)}</div>
+        <div className={styles.amount}>{formatCurrency(savings)}</div>
         <div className={`${styles.trend} ${styles.positive}`}>
           <div className={styles.trendIcon}>
             <TrendingUp size={10} color="var(--success)" />

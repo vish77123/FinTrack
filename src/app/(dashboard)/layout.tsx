@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 import Sidebar from "@/components/sidebar/Sidebar";
 import styles from "@/components/sidebar/sidebar.module.css";
 
+// Force Next.js to completely disable caching for the entire dashboard
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
 export default async function DashboardLayout({
   children,
 }: {

@@ -1,14 +1,35 @@
-export default function TransactionsPage() {
+import { getDashboardData } from "@/lib/data/dashboard";
+import TransactionsView from "@/components/dashboard/TransactionsView";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Receipt } from "lucide-react";
+import styles from "@/components/dashboard/dashboard.module.css";
+import { DashboardModals } from "@/components/dashboard/DashboardModals";
+
+export default async function TransactionsPage() {
+  const data = await getDashboardData();
+  const hasTransactions = data.recentTransactions && data.recentTransactions.length > 0;
+
   return (
-    <div>
-      <div style={{ marginBottom: "32px" }}>
-        <h1 style={{ fontSize: "28px", fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.2 }}>
-          Transactions
-        </h1>
-        <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: "4px" }}>
-          All your income and expenses in one place
-        </p>
-      </div>
-    </div>
+    <>
+      {!hasTransactions ? (
+        <div className={styles.section}>
+          <EmptyState 
+            icon={<Receipt size={48} />}
+            title="No transactions yet"
+            description="Start tracking your spending by adding your first transaction."
+          />
+        </div>
+      ) : (
+        <TransactionsView
+          transactions={data.recentTransactions}
+          currency={data.currency}
+          categories={(data as any).categories || []}
+          accounts={data.accounts || []}
+        />
+      )}
+      
+      {/* Include modals so the "Add Transaction" CTA directly on this page triggers perfectly */}
+      <DashboardModals accounts={data.accounts} categories={(data as any).categories || []} />
+    </>
   );
 }

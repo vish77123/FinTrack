@@ -1,0 +1,249 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  max-width: 900px;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: start;
+}
+
+.pageHeader h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.pageHeader p {
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+
+.settingsSection {
+  margin-bottom: 24px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+}
+
+.listBlock {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.listItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.listItem:last-child {
+  border-bottom: none;
+}
+
+.listItem:hover {
+  background: var(--bg);
+}
+
+.itemLeft {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.iconWrap {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iconWrap.purple { background: var(--accent-light); color: var(--accent); }
+.iconWrap.blue { background: #e0f2fe; color: #0284c7; }
+.iconWrap.green { background: var(--success-light); color: var(--success); }
+.iconWrap.orange { background: #ffedd5; color: #ea580c; }
+.iconWrap.red { background: var(--danger-light); color: var(--danger); }
+.iconWrap.gray { background: var(--bg); color: var(--text-secondary); }
+
+.itemText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.itemTitle {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.itemSubtitle {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.itemRight {
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+/* ==================== EXPANDED PANELS ==================== */
+.expandedPanel {
+  padding: 16px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 300px; }
+}
+
+/* ==================== CURRENCY / OPTION BUTTONS ==================== */
+.optionBtn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.optionBtn:last-child {
+  margin-bottom: 0;
+}
+
+.optionBtn:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+.optionBtn.optionActive {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+/* ==================== THEME TOGGLE BUTTONS ==================== */
+.themeBtn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.themeBtn:hover {
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
+}
+
+.themeBtnActive {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+/* ==================== MOBILE RESPONSIVE ==================== */
+@media (max-width: 768px) {
+  .container {
+    gap: 24px;
+  }
+
+  .settingsGrid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .pageHeader h1 {
+    font-size: 22px;
+  }
+
+  .pageHeader p {
+    font-size: 13px;
+  }
+
+  .listItem {
+    padding: 14px 16px;
+  }
+
+  .itemLeft {
+    gap: 12px;
+  }
+
+  .iconWrap {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .itemTitle {
+    font-size: 14px;
+  }
+
+  .itemSubtitle {
+    font-size: 12px;
+  }
+
+  .expandedPanel {
+    padding: 12px 16px;
+  }
+
+  .themeBtn {
+    padding: 12px 8px;
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  .optionBtn {
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+}

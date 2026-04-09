@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
+import { Menu, X, Home, DollarSign, CreditCard, PieChart, BarChart3, Settings, Plus } from "lucide-react";
+import { useUIStore } from "@/store/useUIStore";
 import styles from "./sidebar.module.css";
 
 interface UserProfile {
@@ -51,7 +54,6 @@ const navItems = [
       {
         label: "Budgets",
         href: "/budgets",
-        badge: "2",
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
@@ -89,53 +91,115 @@ const navItems = [
   },
 ];
 
+// Bottom nav items (subset for mobile)
+const bottomNavItems = [
+  { label: "Home", href: "/dashboard", Icon: Home },
+  { label: "Transactions", href: "/transactions", Icon: DollarSign },
+  { label: "add", href: "#", Icon: Plus }, // FAB placeholder
+  { label: "Budgets", href: "/budgets", Icon: PieChart },
+  { label: "Reports", href: "/reports", Icon: BarChart3 },
+];
+
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
+  const [isOpen, setIsOpen] = useState(false);
+  const { setTransactionModalOpen } = useUIStore();
 
   const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
+    return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
   };
 
-  return (
-    <aside className={styles.sidebar}>
-      <Link href="/dashboard" className={styles.sidebarLogo}>
-        <div className={styles.logoIcon}>M</div>
-        <span className={styles.logoText}>Money Manager</span>
-      </Link>
+  const closeSidebar = () => setIsOpen(false);
 
-      {navItems.map((section) => (
-        <nav key={section.section} className={styles.navSection}>
-          <div className={styles.navSectionLabel}>{section.section}</div>
-          {section.items.map((item) => (
+  return (
+    <>
+      {/* Mobile top bar — only visible on small screens */}
+      <div className={styles.mobileTopBar}>
+        <Link href="/dashboard" className={styles.mobileLogo}>
+          <div className={styles.logoIcon}>M</div>
+          <span className={styles.logoText}>Money Manager</span>
+        </Link>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div className={styles.mobileAvatar}>{getInitials(user.displayName)}</div>
+          <button className={styles.hamburgerBtn} onClick={() => setIsOpen(true)} aria-label="Open menu">
+            <Menu size={22} />
+          </button>
+        </div>
+      </div>
+
+      {/* Backdrop overlay for mobile */}
+      {isOpen && <div className={styles.sidebarOverlay} onClick={closeSidebar} />}
+
+      <aside className={`${styles.sidebar} ${isOpen ? styles.open : ""}`}>
+        {/* Close button — only visible on mobile */}
+        <button className={styles.closeSidebarBtn} onClick={closeSidebar} aria-label="Close menu">
+          <X size={20} />
+        </button>
+
+        <Link href="/dashboard" className={styles.sidebarLogo} onClick={closeSidebar}>
+          <div className={styles.logoIcon}>M</div>
+          <span className={styles.logoText}>Money Manager</span>
+        </Link>
+
+        {navItems.map((section) => (
+          <nav key={section.section} className={styles.navSection}>
+            <div className={styles.navSectionLabel}>{section.section}</div>
+            {section.items.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={closeSidebar}
+                className={`${styles.navItem} ${pathname === item.href || pathname.startsWith(item.href + "/") ? styles.active : ""}`}
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        ))}
+
+        <div className={styles.sidebarFooter}>
+          <div className={styles.userInfo}>
+            <div className={styles.userAvatar}>{getInitials(user.displayName)}</div>
+            <div className={styles.userDetails}>
+              <div className={styles.userName}>{user.displayName}</div>
+              <div className={styles.userEmail}>{user.email}</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* MOBILE BOTTOM NAV — only visible on small screens */}
+      <nav className={styles.bottomNav}>
+        {bottomNavItems.map((item) => {
+          const isAdd = item.label === "add";
+          const isActive = !isAdd && (pathname === item.href || pathname.startsWith(item.href + "/"));
+
+          if (isAdd) {
+            return (
+              <button
+                key="add-fab"
+                className={styles.bottomNavFab}
+                onClick={() => setTransactionModalOpen(true)}
+                aria-label="Add Transaction"
+              >
+                <Plus size={24} />
+              </button>
+            );
+          }
+
+          return (
             <Link
               key={item.href}
               href={item.href}
-              className={`${styles.navItem} ${pathname === item.href || pathname.startsWith(item.href + "/") ? styles.active : ""}`}
+              className={`${styles.bottomNavItem} ${isActive ? styles.bottomNavActive : ""}`}
             >
-              {item.icon}
-              {item.label}
-              {item.badge && <span className={styles.badge}>{item.badge}</span>}
+              <item.Icon size={20} />
+              <span>{item.label}</span>
             </Link>
-          ))}
-        </nav>
-      ))}
-
-      <div className={styles.sidebarFooter}>
-        <div className={styles.userInfo}>
-          <div className={styles.userAvatar}>
-            {getInitials(user.displayName)}
-          </div>
-          <div className={styles.userDetails}>
-            <div className={styles.userName}>{user.displayName}</div>
-            <div className={styles.userEmail}>{user.email}</div>
-          </div>
-        </div>
-      </div>
-    </aside>
+          );
+        })}
+      </nav>
+    </>
   );
 }

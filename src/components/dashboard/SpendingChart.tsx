@@ -2,10 +2,12 @@
 
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import styles from "./dashboard.module.css";
-import { mockData } from "@/lib/mockData";
 
-export default function SpendingChart() {
-  const data = mockData.spendingData;
+interface SpendingChartProps {
+  data: any[];
+}
+
+export default function SpendingChart({ data }: SpendingChartProps) {
 
   return (
     <div className={styles.chartCard}>
@@ -24,7 +26,7 @@ export default function SpendingChart() {
                 dataKey="value"
                 stroke="none"
               >
-                {data.map((entry, index) => (
+                {data.map((entry: any, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
@@ -38,7 +40,7 @@ export default function SpendingChart() {
         </div>
         
         <div className={styles.donutLegend}>
-          {data.map((item, index) => (
+          {data.map((item: any, index) => (
             <div key={index} className={styles.legendItem}>
               <div className={styles.legendLabel}>
                 <div 

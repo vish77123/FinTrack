@@ -209,3 +209,16 @@ input, select, textarea {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
 }
+
+/* ==================== MOBILE RESPONSIVE ==================== */
+@media (max-width: 768px) {
+  .btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .hide-mobile {
+    display: none !important;
+  }
+}
+

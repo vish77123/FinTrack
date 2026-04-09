@@ -1,0 +1,186 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* HEADER */
+.headerRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.pageTitle {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.pageSubtitle {
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+
+.filterPills {
+  display: flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.pillBtn {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: calc(var(--radius-sm) - 4px);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.pillBtn.active {
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* CHARTS SECTION */
+.chartCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 32px;
+}
+
+.splitGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+/* DONUT LEGEND SPECIFICS */
+.donutContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.donutWrapper {
+  height: 240px;
+  position: relative;
+}
+
+.donutLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.legendRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.legendLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.legendColor {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+}
+
+.legendAmount {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+/* ==================== MOBILE RESPONSIVE ==================== */
+@media (max-width: 768px) {
+  .container {
+    gap: 20px;
+  }
+
+  .headerRow {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .pageTitle {
+    font-size: 22px;
+  }
+
+  .pageSubtitle {
+    font-size: 13px;
+  }
+
+  .filterPills {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .filterPills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pillBtn {
+    padding: 6px 12px;
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .chartCard {
+    padding: 16px;
+  }
+
+  .cardTitle {
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+
+  .splitGrid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .donutWrapper {
+    height: 200px;
+  }
+
+  .donutLegend {
+    gap: 12px;
+  }
+
+  .legendLabel {
+    font-size: 13px;
+  }
+
+  .legendAmount {
+    font-size: 13px;
+  }
+}

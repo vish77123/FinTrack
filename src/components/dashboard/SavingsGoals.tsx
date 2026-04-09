@@ -1,10 +1,15 @@
 import { Target } from "lucide-react";
 import styles from "./dashboard.module.css";
-import { mockData } from "@/lib/mockData";
 
-export default function SavingsGoals() {
+interface SavingsGoalsProps {
+  goals: any[];
+  currency: string;
+}
+
+export default function SavingsGoals({ goals, currency }: SavingsGoalsProps) {
   const formatCurrency = (amount: number) => {
-    return `${mockData.currency}${amount.toLocaleString("en-IN")}`;
+    const val = amount || 0;
+    return `${currency}${val.toLocaleString("en-IN")}`;
   };
 
   return (
@@ -15,26 +20,27 @@ export default function SavingsGoals() {
       </div>
       
       <div className={styles.goalsList}>
-        {mockData.savingsGoals.map((goal) => {
-          const progress = Math.min(100, Math.round((goal.current / goal.target) * 100));
+        {goals.map((goal: any) => {
+          const progress = Math.min(100, Math.round((goal.saved / goal.target) * 100));
+          const colorFallback = goal.color || "var(--accent)";
           
           return (
             <div key={goal.id} className={styles.goalCard}>
               <div className={styles.goalHeader}>
                 <div 
                   className={styles.txnIcon} 
-                  style={{ background: `${goal.color}20`, color: goal.color, margin: 0 }}
+                  style={{ background: `${colorFallback}20`, color: colorFallback, margin: 0 }}
                 >
                   <Target size={18} />
                 </div>
                 <div className={styles.goalInfo}>
                   <div className={styles.goalName}>{goal.name}</div>
-                  <div className={styles.goalDate}>{goal.date}</div>
+                  <div className={styles.goalDate}>{goal.targetDate}</div>
                 </div>
               </div>
               
               <div className={styles.goalAmounts}>
-                <span>{formatCurrency(goal.current)}</span>
+                <span>{formatCurrency(goal.saved)}</span>
                 <span>{formatCurrency(goal.target)}</span>
               </div>
               
@@ -43,7 +49,7 @@ export default function SavingsGoals() {
                   style={{ 
                     height: "100%", 
                     width: `${progress}%`, 
-                    background: goal.color,
+                    background: colorFallback,
                     borderRadius: "3px"
                   }} 
                 />

@@ -1,10 +1,14 @@
 import { Landmark, CreditCard, PieChart } from "lucide-react";
 import styles from "./dashboard.module.css";
-import { mockData } from "@/lib/mockData";
 
-export default function AccountCards() {
+interface AccountCardsProps {
+  accounts: any[];
+  currency: string;
+}
+
+export default function AccountCards({ accounts, currency }: AccountCardsProps) {
   const formatCurrency = (amount: number) => {
-    return `${mockData.currency}${Math.abs(amount).toLocaleString("en-IN", {
+    return `${currency}${Math.abs(amount).toLocaleString("en-IN", {
       minimumFractionDigits: 2,
     })}`;
   };
@@ -26,7 +30,7 @@ export default function AccountCards() {
       </div>
       
       <div className={styles.accountsScroll}>
-        {mockData.accounts.map((account) => (
+        {accounts.map((account: any) => (
           <div key={account.id} className={styles.accountCard}>
             <div className={styles.accountIcon}>
               {getIcon(account.type)}

@@ -1,21 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { AlertCircle, Check, X, Smartphone, Mail } from "lucide-react";
+import { useState, useEffect } from "react";
+import { AlertCircle, Smartphone, Mail } from "lucide-react";
 import styles from "./dashboard.module.css";
-import { mockData } from "@/lib/mockData";
 
-export default function PendingTray() {
-  const [pendingItems, setPendingItems] = useState(mockData.pendingTransactions);
+interface PendingTrayProps {
+  items: any[];
+  currency: string;
+}
+
+export default function PendingTray({ items, currency }: PendingTrayProps) {
+  const [pendingItems, setPendingItems] = useState(items);
+
+  useEffect(() => {
+    setPendingItems(items);
+  }, [items]);
 
   if (pendingItems.length === 0) return null;
 
   const handleConfirm = (id: string) => {
-    setPendingItems((items) => items.filter((i) => i.id !== id));
+    setPendingItems((currentItems) => currentItems.filter((i) => i.id !== id));
   };
 
   const handleDiscard = (id: string) => {
-    setPendingItems((items) => items.filter((i) => i.id !== id));
+    setPendingItems((currentItems) => currentItems.filter((i) => i.id !== id));
   };
 
   return (
@@ -35,7 +43,7 @@ export default function PendingTray() {
             <div className={styles.txnDetails}>
               <div className={styles.txnMerchant}>{item.merchant}</div>
               <div className={styles.txnMeta}>
-                <span>{mockData.currency}{item.amount}</span> • 
+                <span>{currency}{item.amount}</span> • 
                 <span>{item.account}</span> • 
                 <span className={styles.pendingSource}>
                   {item.detectedVia === "SMS" ? <Smartphone size={8} className="mr-1 inline" /> : <Mail size={8} className="mr-1 inline" />}
