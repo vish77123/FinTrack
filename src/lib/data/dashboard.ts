@@ -72,6 +72,11 @@ export async function getDashboardData() {
     // A. Net Worth Calculation
     const netWorth = accountsRaw.reduce((sum, acc) => sum + Number(acc.balance), 0);
 
+    // A1. Today's Spent Calculation
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let todaySpent = 0;
+
     // A2. Calculate Income, Expenses, and Savings for the current month
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -82,6 +87,12 @@ export async function getDashboardData() {
       if (txnDate >= monthStart) {
         if (txn.type === 'income') totalIncome += Number(txn.amount);
         if (txn.type === 'expense') totalExpenses += Number(txn.amount);
+      }
+      
+      const justDate = new Date(txn.date);
+      justDate.setHours(0, 0, 0, 0);
+      if (justDate.getTime() === today.getTime() && txn.type === 'expense') {
+        todaySpent += Number(txn.amount);
       }
     });
     const totalSavings = totalIncome - totalExpenses;
@@ -100,18 +111,26 @@ export async function getDashboardData() {
           groupsMap.set(dayLabel, {
             id: `group_${dayLabel}`,
             dateLabel: dayLabel,
+            dailyIncome: 0,
+            dailyExpense: 0,
             transactions: []
           });
         }
 
         const group = groupsMap.get(dayLabel);
+        if (txn.type === 'income') group.dailyIncome += Number(txn.amount);
+        if (txn.type === 'expense') group.dailyExpense += Number(txn.amount);
+        
         group.transactions.push({
           id: txn.id,
+          date: txn.date,
           merchant: txn.note || (txn.categories ? txn.categories.name : 'Transaction'),
           category: txn.categories ? txn.categories.name : 'General',
           amount: Number(txn.amount),
           type: txn.type,
-          account: txn.accounts ? txn.accounts.name : 'Account'
+          account: txn.accounts ? txn.accounts.name : 'Account',
+          icon: txn.categories?.icon,
+          color: txn.categories?.color
         });
       });
 
@@ -153,6 +172,7 @@ export async function getDashboardData() {
     return {
       currency: "₹",
       netWorth,
+      todaySpent,
       income: totalIncome,
       expenses: totalExpenses,
       savings: totalSavings,

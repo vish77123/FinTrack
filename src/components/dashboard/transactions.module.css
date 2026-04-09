@@ -149,31 +149,47 @@
   background-color: var(--accent-light);
 }
 
-/* LIST VIEW */
+/* TRANSACTION LIST (Detailed) */
 .transactionsContainer {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
+  border-radius: var(--radius-md);
+  margin-bottom: 24px;
 }
 
 .dateGroupContainer {
-  display: flex;
-  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+
+.dateGroupContainer:last-child {
+  border-bottom: none;
 }
 
 .dateHeader {
-  background: var(--bg);
-  padding: 12px 24px;
+  padding: 12px 20px;
+  background: var(--card);
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
-  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-.dateGroupContainer:first-child .dateHeader {
-  border-top: none;
+.dateHeaderTotals {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.textSuccess {
+  color: var(--success);
+}
+
+.textDanger {
+  color: var(--danger);
 }
 
 .groupItems {

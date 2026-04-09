@@ -38,7 +38,7 @@ export default async function DashboardPage() {
       <DashboardHeader userName={userName} />
       
       <SummaryGrid 
-        netWorth={dashboardData.netWorth}
+        todaySpent={(dashboardData as any).todaySpent}
         income={dashboardData.income}
         expenses={dashboardData.expenses}
         savings={dashboardData.savings}

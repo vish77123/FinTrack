@@ -2,14 +2,14 @@ import { TrendingUp, TrendingDown } from "lucide-react";
 import styles from "./dashboard.module.css";
 
 interface SummaryGridProps {
-  netWorth: number;
+  todaySpent: number;
   income: number;
   expenses: number;
   savings: number;
   currency: string;
 }
 
-export default function SummaryGrid({ netWorth, income, expenses, savings, currency }: SummaryGridProps) {
+export default function SummaryGrid({ todaySpent, income, expenses, savings, currency }: SummaryGridProps) {
   const formatCurrency = (amount: number) => {
     return `${currency}${amount.toLocaleString("en-IN", {
       minimumFractionDigits: 2,
@@ -19,8 +19,8 @@ export default function SummaryGrid({ netWorth, income, expenses, savings, curre
   return (
     <div className={styles.summaryGrid}>
       <div className={`${styles.summaryCard} ${styles.primary}`}>
-        <div className={styles.label}>Total Net Worth</div>
-        <div className={styles.amount}>{formatCurrency(netWorth)}</div>
+        <div className={styles.label}>Today&apos;s Spending</div>
+        <div className={styles.amount}>{formatCurrency(todaySpent)}</div>
         <div className={`${styles.trend} ${styles.positive}`}>
           <div className={styles.trendIcon}>
             <TrendingUp size={10} color="var(--success)" />

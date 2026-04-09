@@ -25,6 +25,7 @@ export default function TransactionsView({ transactions, currency, categories = 
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("");
 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -102,6 +103,12 @@ export default function TransactionsView({ transactions, currency, categories = 
           // Account filter
           if (accountFilter !== "all" && txn.account !== accountFilter) return false;
 
+          // Date filter
+          if (dateFilter) {
+            const txnDate = txn.date ? new Date(txn.date).toISOString().split("T")[0] : "";
+            if (txnDate !== dateFilter) return false;
+          }
+
           return true;
         });
 
@@ -110,7 +117,7 @@ export default function TransactionsView({ transactions, currency, categories = 
         return { ...group, transactions: filteredTxns };
       })
       .filter(Boolean);
-  }, [transactions, typeFilter, searchQuery, categoryFilter, accountFilter]);
+  }, [transactions, typeFilter, searchQuery, categoryFilter, accountFilter, dateFilter]);
 
   // CSV Export
   const handleExportCSV = () => {
@@ -210,6 +217,12 @@ export default function TransactionsView({ transactions, currency, categories = 
         </div>
 
         <div className={styles.dropdownFilters}>
+          <input
+            type="date"
+            className={styles.filterDropdown}
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+          />
           <select
             className={styles.filterDropdown}
             value={categoryFilter}
@@ -244,7 +257,13 @@ export default function TransactionsView({ transactions, currency, categories = 
         ) : (
           filteredTransactions.map((group: any) => (
             <div key={group.id} className={styles.dateGroupContainer}>
-              <div className={styles.dateHeader}>{group.dateLabel}</div>
+              <div className={styles.dateHeader}>
+                <span>{group.dateLabel}</span>
+                <div className={styles.dateHeaderTotals}>
+                  {group.dailyIncome > 0 && <span className={styles.textSuccess}>+{formatCurrency(group.dailyIncome, 'income').replace('+ ', '')}</span>}
+                  {group.dailyExpense > 0 && <span className={styles.textDanger}>-{formatCurrency(group.dailyExpense, 'expense').replace('− ', '')}</span>}
+                </div>
+              </div>
               
               <div className={styles.groupItems}>
                 {group.transactions.map((txn: any) => {
@@ -255,8 +274,11 @@ export default function TransactionsView({ transactions, currency, categories = 
                       
                       {/* Left: Icon, Title, Subtitle */}
                       <div className={styles.rowLeft}>
-                        <div className={styles.txnIconWrap}>
-                          {getIcon(txn.category)}
+                        <div 
+                          className={styles.txnIconWrap}
+                          style={txn.color ? { backgroundColor: `${txn.color}15`, color: txn.color, borderColor: `${txn.color}30` } : undefined}
+                        >
+                          {txn.icon || getIcon(txn.category)}
                         </div>
                         <div className={styles.txnDetails}>
                           <div className={styles.txnTitle}>{txn.merchant}</div>

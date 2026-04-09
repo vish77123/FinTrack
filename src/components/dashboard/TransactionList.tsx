@@ -77,9 +77,9 @@ export default function TransactionList({ items, currency }: TransactionListProp
               <div key={txn.id} className={styles.txnItem} style={{ opacity: isPending ? 0.6 : 1 }}>
                 <div 
                   className={styles.txnIcon}
-                  style={{ background: `${txn.categoryColor || '#eee'}20`, color: txn.categoryColor || '#333' }}
+                  style={txn.color ? { backgroundColor: `${txn.color}15`, color: txn.color, borderColor: `${txn.color}30` } : { background: `${txn.categoryColor || '#eee'}20`, color: txn.categoryColor || '#333' }}
                 >
-                  {getIcon(txn.category)}
+                  {txn.icon || getIcon(txn.category)}
                 </div>
                 
                 <div className={styles.txnDetails}>

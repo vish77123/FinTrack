@@ -115,8 +115,23 @@ export function CategoryPicker({ categories, value, onChange, label, error, tran
                 type="text" 
                 className={styles.formInput} 
                 value={newIcon}
-                onChange={(e) => setNewIcon(e.target.value.substring(0, 5))}
-                style={{ textAlign: "center", fontSize: "18px", paddingLeft: "8px", paddingRight: "8px" }}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!val) {
+                    setNewIcon("");
+                    return;
+                  }
+                  // Keep only the most recently typed grapheme (fully supports complex emojis)
+                  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+                    const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
+                    const segments = Array.from(segmenter.segment(val));
+                    setNewIcon(segments[segments.length - 1].segment);
+                  } else {
+                    const chars = Array.from(val);
+                    setNewIcon(chars[chars.length - 1]);
+                  }
+                }}
+                style={{ textAlign: "center", fontSize: "20px", paddingLeft: "8px", paddingRight: "8px" }}
                 title="Enter an Emoji"
               />
               {!newIcon && <Smile size={16} color="var(--text-tertiary)" style={{ position: "absolute", top: "14px", left: "22px", pointerEvents: "none" }}/>}
