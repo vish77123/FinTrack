@@ -36,18 +36,20 @@ import Bytez from "bytez.js";
 // ═══════════════════════════════════════════════════════════
 
 export async function parseBatchWithBytez(
-  emails: { id: string; text: string }[]
+  emails: { id: string; text: string }[],
+  config?: any
 ): Promise<Map<string, LLMParsedTransaction>> {
   const results = new Map<string, LLMParsedTransaction>();
   if (emails.length === 0) return results;
 
-  const apiKey = process.env.BYTEZ_API_KEY;
+  const apiKey = config?.bytezKey || process.env.BYTEZ_API_KEY;
   if (!apiKey) {
-    console.warn("[BYTEZ] BYTEZ_API_KEY not configured. Skipping Bytez fallback.");
+    console.warn("[BYTEZ] No API key configured. Skipping Bytez fallback.");
     return results;
   }
 
   const bytez = new Bytez(apiKey);
+  const targetModel = config?.bytezModel || "Qwen/Qwen2.5-7B-Instruct";
 
   const emailsBlock = emails.map((email, idx) => `
 --- EMAIL ${idx + 1} (ID: ${email.id}) ---
@@ -72,10 +74,10 @@ ${emailsBlock}
 `;
 
   try {
-    console.log(`[BYTEZ] Sending batch of ${emails.length} emails to Bytez SDK (Qwen/Qwen2.5-7B-Instruct)...`);
+    console.log(`[BYTEZ] Sending batch of ${emails.length} emails to Bytez SDK (${targetModel})...`);
 
     // Wrap the prompt in chat format to enforce instruction-following instead of getting a conversational greeting
-    const response = await bytez.model("Qwen/Qwen2.5-7B-Instruct").run([
+    const response = await bytez.model(targetModel).run([
       { role: "system", content: "You are a strictly deterministic extraction engine. Always output a raw JSON array." },
       { role: "user", content: prompt }
     ], { max_new_tokens: 2000 });

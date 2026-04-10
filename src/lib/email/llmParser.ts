@@ -35,7 +35,7 @@ interface KeyState {
 const RPM_LIMIT = 5;
 const RPD_LIMIT = 20;
 
-let apiKeys: KeyState[] = [];
+let globalApiKeys: KeyState[] = [];
 let keysInitialized = false;
 
 function getNextMidnight(): number {
@@ -44,7 +44,7 @@ function getNextMidnight(): number {
   return d.getTime();
 }
 
-function initKeys() {
+function initGlobalKeys() {
   if (keysInitialized) return;
   keysInitialized = true;
 
@@ -57,14 +57,9 @@ function initKeys() {
   }
 
   const uniqueKeys = Array.from(new Set(keyStrings.filter(Boolean)));
-
-  if (uniqueKeys.length === 0) {
-    console.warn("[LLM] No GEMINI_API_KEY configured.");
-    return;
-  }
-
   const now = Date.now();
-  apiKeys = uniqueKeys.map(key => ({
+  
+  globalApiKeys = uniqueKeys.map(key => ({
     key,
     client: new GoogleGenAI({ apiKey: key }),
     requestsThisMinute: 0,
@@ -73,8 +68,24 @@ function initKeys() {
     dayResetAt: getNextMidnight(),
     lastError429At: 0,
   }));
+}
 
-  console.log(`[LLM] Initialized ${apiKeys.length} API key(s). Limits: ${RPM_LIMIT} RPM, ${RPD_LIMIT} RPD per key.`);
+function getRequestKeys(userKeys?: string[] | null): KeyState[] {
+  initGlobalKeys();
+  if (!userKeys || userKeys.length === 0) {
+    return globalApiKeys;
+  }
+  
+  const now = Date.now();
+  return userKeys.map(key => ({
+    key,
+    client: new GoogleGenAI({ apiKey: key }),
+    requestsThisMinute: 0,
+    requestsToday: 0,
+    minuteResetAt: now + 60_000,
+    dayResetAt: getNextMidnight(),
+    lastError429At: 0,
+  }));
 }
 
 function resetCountersIfNeeded(state: KeyState): void {
@@ -98,12 +109,11 @@ function isKeyAvailable(state: KeyState): boolean {
   return state.requestsThisMinute < RPM_LIMIT && state.requestsToday < RPD_LIMIT;
 }
 
-function pickBestKey(): KeyState | null {
-  initKeys();
+function pickBestKey(activeKeys: KeyState[]): KeyState | null {
   let best: KeyState | null = null;
   let bestRemaining = -1;
 
-  for (const k of apiKeys) {
+  for (const k of activeKeys) {
     if (!isKeyAvailable(k)) continue;
     const remaining = RPD_LIMIT - k.requestsToday;
     if (remaining > bestRemaining) {
@@ -119,32 +129,28 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Rate-limited Gemini API call — exact pattern from the working codebase.
- * Picks best key, rotates on 429, waits if all exhausted.
+ * Fast-failing Gemini API call. 
+ * Picks best key, rotates on 429/503. If all keys hit rate limits, returns instantly.
  */
 async function rateLimitedGenerate(options: {
   model: string;
   contents: string;
   config?: Record<string, any>;
-}): Promise<string | null> {
-  initKeys();
-  const MAX_RETRIES = 2;
+}, activeKeys: KeyState[]): Promise<string | null> {
+  // Try all available keys efficiently without artificial wait loops
+  const MAX_ATTEMPTS = activeKeys.length * 2;
   let attempt = 0;
-  while (attempt < MAX_RETRIES) {
-    const keyState = pickBestKey();
+  
+  while (attempt < MAX_ATTEMPTS) {
+    const keyState = pickBestKey(activeKeys);
 
     if (!keyState) {
-      const now = Date.now();
-      const nextMinuteReset = Math.min(...apiKeys.map(k => k.minuteResetAt));
-      const waitMs = Math.max(nextMinuteReset - now, 5_000) + 1_000;
-      console.warn(`[LLM] All keys exhausted. Waiting ${Math.round(waitMs / 1000)}s...`);
-      await sleep(waitMs);
-      attempt++; // exhaustion counts as an attempt
-      continue;
+      console.warn(`[LLM] All keys exhausted or on cooldown. Fast-failing instantly to fallback.`);
+      return null;
     }
 
     try {
-      const keyIndex = apiKeys.indexOf(keyState) + 1;
+      const keyIndex = activeKeys.indexOf(keyState) + 1;
       const response = await keyState.client.models.generateContent({
         model: options.model,
         contents: options.contents,
@@ -158,28 +164,29 @@ async function rateLimitedGenerate(options: {
 
     } catch (err: any) {
       const status = err?.status || err?.httpStatusCode || err?.code;
-      const keyIndex = apiKeys.indexOf(keyState) + 1;
+      const keyIndex = activeKeys.indexOf(keyState) + 1;
 
       if (status === 429 || err?.message?.includes("429")) {
-        console.warn(`[LLM] Key ${keyIndex} hit 429. Rotating key (attempt not consumed).`);
+        console.warn(`[LLM] Key ${keyIndex} hit 429. Rotating instantly...`);
         keyState.lastError429At = Date.now();
-        // Do NOT increment attempt — we just rotate to another key
+        attempt++;
         continue;
       }
 
       if (status === 503 || err?.message?.includes("503")) {
-        console.warn(`[LLM] Key ${keyIndex} hit 503. Waiting 10s...`);
-        await sleep(2000);
-        attempt++; // 503 is a real failure, count it
+        console.warn(`[LLM] Key ${keyIndex} hit 503. Rotating instantly...`);
+        keyState.lastError429At = Date.now(); // treat 503 as a cooldown block to force failover
+        attempt++;
         continue;
       }
 
       console.error(`[LLM] Key ${keyIndex} error:`, err?.message || err);
-      throw err;
+      // Hard failure (not a temporary load error), fail instantly.
+      return null;
     }
   }
 
-  console.error("[LLM] All retries exhausted.");
+  console.error("[LLM] All fast-fail retries exhausted.");
   return null;
 }
 
@@ -217,13 +224,14 @@ interface EmailForParsing {
 }
 
 export async function parseBatchWithLLM(
-  emails: EmailForParsing[]
+  emails: EmailForParsing[],
+  config?: any
 ): Promise<Map<string, LLMParsedTransaction>> {
   const results = new Map<string, LLMParsedTransaction>();
   if (emails.length === 0) return results;
 
-  initKeys();
-  if (apiKeys.length === 0) return results;
+  const activeKeys = getRequestKeys(config?.geminiKeys);
+  if (activeKeys.length === 0) return results;
 
   // Build the prompt — same structure as the working FinTrackPro code
   const emailsBlock = emails.map((email, idx) => `
@@ -249,10 +257,11 @@ ${emailsBlock}
 `;
 
   try {
-    console.log(`[LLM] Sending batch of ${emails.length} emails to gemini-2.5-flash...`);
+    const targetModel = config?.geminiModel || "gemini-2.5-flash";
+    console.log(`[LLM] Sending batch of ${emails.length} emails to ${targetModel}...`);
 
     const outputString = await rateLimitedGenerate({
-      model: "gemini-2.5-flash",
+      model: targetModel,
       contents: batchPrompt,
       config: {
         responseMimeType: "application/json",
@@ -272,7 +281,7 @@ ${emailsBlock}
           },
         },
       },
-    });
+    }, activeKeys);
 
     console.log(`[LLM] Raw response: ${outputString?.slice(0, 600) || "(empty)"}`);
 

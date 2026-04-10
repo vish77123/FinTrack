@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { signOut } from "@/app/login/actions";
 import { 
   User, DollarSign, Moon, Sun, Monitor, Tag, Download, LogOut,
-  Check, X, Pencil, Save, Mail, Zap, Bot, RefreshCw, Clock
+  Check, X, Pencil, Save, Mail, Zap, Bot, RefreshCw, Clock, Key, Sparkles
 } from "lucide-react";
 import styles from "@/components/dashboard/settings.module.css";
 import { useUIStore } from "@/store/useUIStore";
@@ -60,6 +60,7 @@ export function SettingsClient() {
   const [regexEnabled, setRegexEnabled] = useState(true);
   const [llmEnabled, setLlmEnabled] = useState(false);
   const [syncInterval, setSyncInterval] = useState(60);
+  const [aiProvider, setAiProvider] = useState<"gemini" | "bytez">("gemini");
 
   // Load profile on mount
   useEffect(() => {
@@ -78,6 +79,7 @@ export function SettingsClient() {
         setRegexEnabled(res.settings.regex_enabled ?? true);
         setLlmEnabled(res.settings.llm_enabled ?? false);
         setSyncInterval(res.settings.sync_interval_minutes ?? 60);
+        setAiProvider(res.settings.selected_llm_provider || "gemini");
       }
     });
   }, []);
@@ -430,7 +432,7 @@ export function SettingsClient() {
                 </div>
               </div>
 
-              {/* LLM Engine toggle */}
+              {/* AI Engine Configuration */}
               <div className={styles.listItem} onClick={() => {
                 const newVal = !llmEnabled;
                 setLlmEnabled(newVal);
@@ -444,8 +446,8 @@ export function SettingsClient() {
                 <div className={styles.itemLeft}>
                   <div className={`${styles.iconWrap} ${styles.green}`}><Bot size={18} /></div>
                   <div className={styles.itemText}>
-                    <div className={styles.itemTitle}>AI Parser (Gemini)</div>
-                    <div className={styles.itemSubtitle}>Fallback for unrecognized emails (uses API)</div>
+                    <div className={styles.itemTitle}>AI Engine Enabled</div>
+                    <div className={styles.itemSubtitle}>Enable LLM extraction for non-standard emails</div>
                   </div>
                 </div>
                 <div className={styles.itemRight}>
@@ -454,6 +456,117 @@ export function SettingsClient() {
                   </div>
                 </div>
               </div>
+
+              {/* Advanced LLM Settings Panel */}
+              {llmEnabled && (
+                <div className={styles.aiConfigPanel} onClick={(e) => e.stopPropagation()}>
+                  
+                  {/* Provider tabs */}
+                  <div className={styles.aiProviderTabs}>
+                    <button
+                      className={`${styles.aiProviderTab} ${aiProvider === "gemini" ? styles.aiProviderTabActive : ""}`}
+                      onClick={() => {
+                        setAiProvider("gemini");
+                        const fd = new FormData();
+                        fd.append("update_ai_config", "true");
+                        fd.append("selected_llm_provider", "gemini");
+                        startTransition(() => updateEmailSyncSettingsAction(fd));
+                      }}
+                    >
+                      <Sparkles size={14} /> Google Gemini
+                    </button>
+                    <button
+                      className={`${styles.aiProviderTab} ${aiProvider === "bytez" ? styles.aiProviderTabActive : ""}`}
+                      onClick={() => {
+                        setAiProvider("bytez");
+                        const fd = new FormData();
+                        fd.append("update_ai_config", "true");
+                        fd.append("selected_llm_provider", "bytez");
+                        startTransition(() => updateEmailSyncSettingsAction(fd));
+                      }}
+                    >
+                      <Bot size={14} /> Bytez API
+                    </button>
+                  </div>
+
+                  <div className={styles.aiConfigDivider} />
+
+                  {aiProvider === "gemini" ? (
+                    <>
+                      <div className={styles.aiConfigField}>
+                        <label className={styles.aiConfigLabel}>API Keys</label>
+                        <input
+                          type="text"
+                          className={styles.aiConfigInput}
+                          placeholder="AIzaSy... , AIzaSy..."
+                          defaultValue={gmailStatus?.settings?.gemini_api_keys?.join(", ") || ""}
+                          onBlur={(e) => {
+                            const fd = new FormData();
+                            fd.append("update_ai_config", "true");
+                            fd.append("gemini_api_keys", e.target.value);
+                            startTransition(() => updateEmailSyncSettingsAction(fd));
+                          }}
+                        />
+                        <p className={styles.aiConfigHint}>
+                          Comma-separated. Multiple keys rotate automatically to maximize your daily quota.
+                        </p>
+                      </div>
+                      <div className={styles.aiConfigField}>
+                        <label className={styles.aiConfigLabel}>Model</label>
+                        <select
+                          className={styles.aiConfigSelect}
+                          defaultValue={gmailStatus?.settings?.gemini_model_id || "gemini-2.5-flash"}
+                          onChange={(e) => {
+                            const fd = new FormData();
+                            fd.append("update_ai_config", "true");
+                            fd.append("gemini_model_id", e.target.value);
+                            startTransition(() => updateEmailSyncSettingsAction(fd));
+                          }}
+                        >
+                          <option value="gemini-2.5-flash">Gemini 2.5 Flash — 20 RPD free tier</option>
+                          <option value="gemini-2.0-flash">Gemini 2.0 Flash — Higher throughput</option>
+                        </select>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className={styles.aiConfigField}>
+                        <label className={styles.aiConfigLabel}>API Key</label>
+                        <input
+                          type="password"
+                          className={styles.aiConfigInput}
+                          placeholder="Enter your Bytez API key"
+                          defaultValue={gmailStatus?.settings?.bytez_api_key || ""}
+                          onBlur={(e) => {
+                            const fd = new FormData();
+                            fd.append("update_ai_config", "true");
+                            fd.append("bytez_api_key", e.target.value);
+                            startTransition(() => updateEmailSyncSettingsAction(fd));
+                          }}
+                        />
+                      </div>
+                      <div className={styles.aiConfigField}>
+                        <label className={styles.aiConfigLabel}>Model</label>
+                        <input
+                          type="text"
+                          className={styles.aiConfigInput}
+                          placeholder="e.g. Qwen/Qwen2.5-7B-Instruct"
+                          defaultValue={gmailStatus?.settings?.bytez_model_id || "Qwen/Qwen2.5-7B-Instruct"}
+                          onBlur={(e) => {
+                            const fd = new FormData();
+                            fd.append("update_ai_config", "true");
+                            fd.append("bytez_model_id", e.target.value);
+                            startTransition(() => updateEmailSyncSettingsAction(fd));
+                          }}
+                        />
+                        <p className={styles.aiConfigHint}>
+                          Any Hugging Face model ID supported by Bytez.
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Sync Interval */}
               <div className={styles.listItem}>

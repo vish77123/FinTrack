@@ -48,13 +48,9 @@ export default async function DashboardPage() {
         currency={dashboardData.currency}
       />
       
-      <PendingTray items={dashboardData.pendingTransactions} currency={dashboardData.currency} />
-
-      {pendingTxns.length > 0 && (
-        <div style={{ marginTop: "24px" }}>
-          <PendingTransactions transactions={pendingTxns} currency={dashboardData.currency} />
-        </div>
-      )}
+      <div style={{ marginTop: "24px", marginBottom: "24px" }}>
+        <PendingTray items={pendingTxns as any} currency={dashboardData.currency} />
+      </div>
       
       <AccountCards accounts={dashboardData.accounts} currency={dashboardData.currency} />
       

@@ -124,8 +124,117 @@
 }
 
 @keyframes slideDown {
-  from { opacity: 0; max-height: 0; }
-  to { opacity: 1; max-height: 300px; }
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ==================== AI CONFIG PANEL ==================== */
+.aiConfigPanel {
+  padding: 20px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  animation: slideDown 0.2s ease;
+}
+
+.aiConfigField {
+  margin-bottom: 16px;
+}
+
+.aiConfigField:last-child {
+  margin-bottom: 0;
+}
+
+.aiConfigLabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+}
+
+.aiConfigInput,
+.aiConfigSelect {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.aiConfigSelect {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+.aiConfigInput:focus,
+.aiConfigSelect:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+.aiConfigInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+.aiConfigHint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+
+.aiProviderTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.aiProviderTab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.aiProviderTab:hover {
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
+}
+
+.aiProviderTabActive {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.aiConfigDivider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
 }
 
 /* ==================== CURRENCY / OPTION BUTTONS ==================== */
@@ -234,6 +343,21 @@
 
   .expandedPanel {
     padding: 12px 16px;
+  }
+
+  .aiConfigPanel {
+    padding: 14px 16px;
+  }
+
+  .aiProviderTab {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .aiConfigInput,
+  .aiConfigSelect {
+    padding: 8px 12px;
+    font-size: 13px;
   }
 
   .themeBtn {

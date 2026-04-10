@@ -225,17 +225,30 @@ export async function syncGmailAction() {
   let llmResultsMap = new Map<string, any>();
 
   if (regexFailures.length > 0 && llmEnabled) {
-    console.log(`[SYNC] ${regexFailures.length} regex failures → sending as ONE batch to LLM`);
+    console.log(`[SYNC] ${regexFailures.length} regex failures → sending to AI Parsers`);
     const emailsForLLM = regexFailures.map(e => ({
       id: e.msgId,
       text: e.fullText.slice(0, 400),
     }));
-    // Primary: Bytez (Gemini temporarily disabled per user request)
-    console.log(`[SYNC] Routing directly to Bytez API...`);
-    llmResultsMap = await parseBatchWithBytez(emailsForLLM);
-    
-    // Fallback: Gemini (disabled)
-    // if (llmResultsMap.size === 0) { ... }
+
+    const config = {
+      geminiKeys: settings?.gemini_api_keys,
+      geminiModel: settings?.gemini_model_id,
+      bytezKey: settings?.bytez_api_key,
+      bytezModel: settings?.bytez_model_id,
+    };
+
+    if (settings?.selected_llm_provider === "bytez") {
+      console.log(`[SYNC] User preferred primary provider: Bytez`);
+      llmResultsMap = await parseBatchWithBytez(emailsForLLM, config);
+    } else {
+      console.log(`[SYNC] User preferred primary provider: Google Gemini`);
+      llmResultsMap = await parseBatchWithLLM(emailsForLLM, config);
+      if (llmResultsMap.size === 0) {
+        console.log(`[SYNC] Gemini exhausted. Gracefully failing over to Bytez...`);
+        llmResultsMap = await parseBatchWithBytez(emailsForLLM, config);
+      }
+    }
   }
 
   // ── PHASE 3: Save results ──────────────────────────
@@ -457,20 +470,34 @@ export async function updateEmailSyncSettingsAction(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
-  const approvalRequired = formData.get("approval_required") === "true";
-  const regexEnabled = formData.get("regex_enabled") === "true";
-  const llmEnabled = formData.get("llm_enabled") === "true";
-  const syncInterval = parseInt(formData.get("sync_interval_minutes") as string) || 60;
+  const { data: existing } = await supabase
+    .from("email_sync_settings")
+    .select("*")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const isAiConfig = formData.get("update_ai_config") === "true";
+  let updates: any = { user_id: user.id };
+
+  if (isAiConfig) {
+    if (formData.has("selected_llm_provider")) updates.selected_llm_provider = formData.get("selected_llm_provider");
+    if (formData.has("gemini_api_keys")) {
+      const keysStr = formData.get("gemini_api_keys") as string;
+      updates.gemini_api_keys = keysStr ? keysStr.split(",").map(k => k.trim()).filter(Boolean) : null;
+    }
+    if (formData.has("gemini_model_id")) updates.gemini_model_id = formData.get("gemini_model_id");
+    if (formData.has("bytez_api_key")) updates.bytez_api_key = formData.get("bytez_api_key") || null;
+    if (formData.has("bytez_model_id")) updates.bytez_model_id = formData.get("bytez_model_id");
+  } else {
+    updates.approval_required = formData.get("approval_required") === "true";
+    updates.regex_enabled = formData.get("regex_enabled") === "true";
+    updates.llm_enabled = formData.get("llm_enabled") === "true";
+    updates.sync_interval_minutes = parseInt(formData.get("sync_interval_minutes") as string) || 60;
+  }
 
   await supabase
     .from("email_sync_settings")
-    .upsert({
-      user_id: user.id,
-      approval_required: approvalRequired,
-      regex_enabled: regexEnabled,
-      llm_enabled: llmEnabled,
-      sync_interval_minutes: syncInterval,
-    }, { onConflict: "user_id" });
+    .upsert({ ...existing, ...updates }, { onConflict: "user_id" });
 
   revalidatePath("/settings");
   return { success: true };

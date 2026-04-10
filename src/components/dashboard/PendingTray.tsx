@@ -1,55 +1,95 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { AlertCircle, Smartphone, Mail } from "lucide-react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { AlertCircle, Smartphone, Mail, Bot, Zap } from "lucide-react";
+import { approvePendingAction, discardPendingAction } from "@/app/actions/gmail";
 import styles from "./dashboard.module.css";
 
+interface PendingTransaction {
+  id: string;
+  type: string;
+  amount: number;
+  date: string;
+  note: string;
+  confidence: number;
+  raw_snippet: string;
+  parsed_by: string;
+  status: string;
+  accounts?: { name: string } | null;
+}
+
 interface PendingTrayProps {
-  items: any[];
+  items: PendingTransaction[];
   currency: string;
 }
 
 export default function PendingTray({ items, currency }: PendingTrayProps) {
-  const [pendingItems, setPendingItems] = useState(items);
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setPendingItems(items);
-  }, [items]);
+  if (!items || items.length === 0) return null;
 
-  if (pendingItems.length === 0) return null;
+  const fmt = (amount: number) => `${currency}${amount.toLocaleString("en-IN")}`;
 
   const handleConfirm = (id: string) => {
-    setPendingItems((currentItems) => currentItems.filter((i) => i.id !== id));
+    setProcessingId(id);
+    startTransition(async () => {
+      await approvePendingAction(id);
+      setProcessingId(null);
+      router.refresh();
+    });
   };
 
   const handleDiscard = (id: string) => {
-    setPendingItems((currentItems) => currentItems.filter((i) => i.id !== id));
+    setProcessingId(id);
+    startTransition(async () => {
+      await discardPendingAction(id);
+      setProcessingId(null);
+      router.refresh();
+    });
+  };
+
+  const getSourceIcon = (parsedBy: string) => {
+    return parsedBy === "llm" ? <Bot size={12} className="mr-1 inline" /> : <Zap size={12} className="mr-1 inline" />;
+  };
+
+  // Very simple category guessing based on notes, since UI has food/transport icons
+  const getCategoryIcon = (note: string) => {
+    const lnote = note.toLowerCase();
+    if (lnote.includes("uber") || lnote.includes("ola") || lnote.includes("rapido")) return "🚗";
+    if (lnote.includes("swiggy") || lnote.includes("zomato") || lnote.includes("mcdonalds") || lnote.includes("food") || lnote.includes("parlour")) return "🍔";
+    if (lnote.includes("amazon") || lnote.includes("flipkart") || lnote.includes("myntra") || lnote.includes("swiggy instamart") || lnote.includes("blinkit")) return "🛒";
+    return "💳";
   };
 
   return (
     <div className={styles.pendingTray}>
       <div className={styles.pendingTrayHeader}>
         <AlertCircle size={16} />
-        <span>{pendingItems.length} transactions auto-detected. Review and add them to your ledger.</span>
+        <span>{items.length} transactions auto-detected. Review and add them to your ledger.</span>
       </div>
       
       <div>
-        {pendingItems.map((item) => (
-          <div key={item.id} className={styles.pendingItem}>
+        {items.map((item) => (
+          <div key={item.id} className={styles.pendingItem} style={{ opacity: processingId === item.id ? 0.5 : 1 }}>
             <div className={styles.txnIcon}>
-              {item.category === "Transport" ? "🚗" : item.category === "Food" ? "🍔" : "🛒"}
+              {getCategoryIcon(item.note)}
             </div>
             
             <div className={styles.txnDetails}>
-              <div className={styles.txnMerchant}>{item.merchant}</div>
+              <div className={styles.txnMerchant}>{item.note || "Bank Transaction"}</div>
               <div className={styles.txnMeta}>
-                <span>{currency}{item.amount}</span> • 
-                <span>{item.account}</span> • 
-                <span className={styles.pendingSource}>
-                  {item.detectedVia === "SMS" ? <Smartphone size={8} className="mr-1 inline" /> : <Mail size={8} className="mr-1 inline" />}
-                  {item.detectedVia}
+                <span className={item.type === "expense" ? "text-red-500" : "text-green-500"}>
+                  {item.type === "expense" ? "−" : "+"}{fmt(item.amount)}
                 </span>
-                <span>• {item.date}</span>
+                {item.accounts?.name && <span> • {item.accounts.name}</span>}
+                <span className={styles.pendingSource} style={{ marginLeft: "8px" }}>
+                  {getSourceIcon(item.parsed_by)}
+                  {item.parsed_by === "llm" ? "AI Parsed" : "Regex Parsed"}
+                </span>
+                <span>• {new Date(item.date).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}</span>
               </div>
             </div>
             
@@ -57,12 +97,14 @@ export default function PendingTray({ items, currency }: PendingTrayProps) {
               <button 
                 className={`${styles.actionBtn} ${styles.discard}`}
                 onClick={() => handleDiscard(item.id)}
+                disabled={processingId !== null}
               >
                 Discard
               </button>
               <button 
                 className={`${styles.actionBtn} ${styles.confirm}`}
                 onClick={() => handleConfirm(item.id)}
+                disabled={processingId !== null}
               >
                 Confirm
               </button>
