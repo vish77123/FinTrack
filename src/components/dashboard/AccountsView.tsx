@@ -1,20 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useUIStore } from "@/store/useUIStore";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Mail, ChevronDown, ChevronUp, Check, X } from "lucide-react";
 import { EditAccountModal } from "@/components/ui/EditAccountModal";
+import { saveAlertProfileAction } from "@/app/actions/gmail";
 import styles from "./accounts.module.css";
 
 interface AccountsViewProps {
   accounts: any[];
   netWorth: number;
   currency: string;
+  alertProfiles?: any[];
 }
 
-export default function AccountsView({ accounts, netWorth, currency }: AccountsViewProps) {
+// Known bank email senders for quick-pick dropdown
+const KNOWN_SENDERS = [
+  { label: "HDFC Bank", value: "alerts@hdfcbank.net" },
+  { label: "HDFC Credit Card", value: "creditcardalerts@hdfcbank.com" },
+  { label: "SBI", value: "alerts@sbi.co.in" },
+  { label: "ICICI Bank", value: "alerts@icicibank.com" },
+  { label: "Axis Bank", value: "alerts@axisbank.com" },
+  { label: "Kotak Bank", value: "alerts.service@kotak.com" },
+  { label: "Yes Bank", value: "alerts@yesbank.in" },
+  { label: "PNB", value: "alerts@pnb.co.in" },
+  { label: "Paytm Bank", value: "noreply@paytmbank.com" },
+  { label: "IndusInd Bank", value: "alerts@indusind.com" },
+  { label: "Custom...", value: "__custom__" },
+];
+
+interface AlertFormState {
+  emailSender: string;
+  customSender: string;
+  last4: string;
+}
+
+export default function AccountsView({ accounts, netWorth, currency, alertProfiles = [] }: AccountsViewProps) {
   const { setAddAccountModalOpen } = useUIStore();
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [editingAccount, setEditingAccount] = useState<any>(null);
+
+  // Controls which account card has its alert section open
+  const [openAlertId, setOpenAlertId] = useState<string | null>(null);
+  const [alertForms, setAlertForms] = useState<Record<string, AlertFormState>>({});
+  const [alertMsgs, setAlertMsgs] = useState<Record<string, string>>({});
 
   const formatCurrency = (amount: number, forcePositive = false) => {
     const val = amount || 0;
@@ -52,6 +83,63 @@ export default function AccountsView({ accounts, netWorth, currency }: AccountsV
     }
   };
 
+  // Get existing alert profile for an account
+  const getProfile = (accountId: string) =>
+    alertProfiles.find((p: any) => p.account_id === accountId);
+
+  const toggleAlert = (accountId: string) => {
+    if (openAlertId === accountId) {
+      setOpenAlertId(null);
+      return;
+    }
+    // Pre-fill from existing profile if present
+    const existing = getProfile(accountId);
+    if (existing && !alertForms[accountId]) {
+      const isCustom = !KNOWN_SENDERS.some(s => s.value === existing.email_sender_filter && s.value !== "__custom__");
+      setAlertForms(prev => ({
+        ...prev,
+        [accountId]: {
+          emailSender: isCustom && existing.email_sender_filter ? "__custom__" : (existing.email_sender_filter || ""),
+          customSender: isCustom ? (existing.email_sender_filter || "") : "",
+          last4: existing.account_last4 || "",
+        }
+      }));
+    }
+    setOpenAlertId(accountId);
+  };
+
+  const updateForm = (accountId: string, field: keyof AlertFormState, value: string) => {
+    setAlertForms(prev => ({
+      ...prev,
+      [accountId]: { ...((prev[accountId]) || { emailSender: "", customSender: "", last4: "" }), [field]: value }
+    }));
+  };
+
+  const handleSaveAlert = (accountId: string) => {
+    const form = alertForms[accountId] || { emailSender: "", customSender: "", last4: "" };
+    const effectiveSender = form.emailSender === "__custom__" ? form.customSender : form.emailSender;
+
+    const fd = new FormData();
+    fd.append("account_id", accountId);
+    fd.append("email_sender_filter", effectiveSender);
+    fd.append("account_last4", form.last4);
+
+    setAlertMsgs(prev => ({ ...prev, [accountId]: "Saving..." }));
+    startTransition(async () => {
+      const res = await saveAlertProfileAction(fd);
+      if (res.error) {
+        setAlertMsgs(prev => ({ ...prev, [accountId]: res.error! }));
+      } else {
+        setAlertMsgs(prev => ({ ...prev, [accountId]: "✓ Saved!" }));
+        setTimeout(() => {
+          setAlertMsgs(prev => ({ ...prev, [accountId]: "" }));
+          setOpenAlertId(null);
+          router.refresh();
+        }, 1500);
+      }
+    });
+  };
+
   return (
     <div className={styles.container}>
       {/* HEADER SECTION */}
@@ -81,8 +169,12 @@ export default function AccountsView({ accounts, netWorth, currency }: AccountsV
         
         {accounts.map((acc: any) => {
           const isNegative = acc.balance < 0;
+          const profile = getProfile(acc.id);
+          const form = alertForms[acc.id] || { emailSender: "", customSender: "", last4: "" };
+          const isAlertOpen = openAlertId === acc.id;
+
           return (
-            <div key={acc.id} className={styles.accountCard}>
+            <div key={acc.id} className={`${styles.accountCard} ${isAlertOpen ? styles.accountCardExpanded : ""}`}>
               <div className={styles.cardHeader}>
                 <div className={styles.cardIcon}>{getIcon(acc.type)}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -91,10 +183,7 @@ export default function AccountsView({ accounts, netWorth, currency }: AccountsV
                   </div>
                   <button
                     className={styles.editBtn}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingAccount(acc);
-                    }}
+                    onClick={(e) => { e.stopPropagation(); setEditingAccount(acc); }}
                     title="Edit Account"
                   >
                     <Pencil size={14} />
@@ -109,7 +198,7 @@ export default function AccountsView({ accounts, netWorth, currency }: AccountsV
 
               <div className={styles.cardDivider}></div>
 
-              {/* Dynamic stats based on account type */}
+              {/* Dynamic stats */}
               <div className={styles.cardStats}>
                 {acc.type === "credit_card" ? (
                   <>
@@ -123,6 +212,102 @@ export default function AccountsView({ accounts, netWorth, currency }: AccountsV
                   </>
                 )}
               </div>
+
+              {/* EMAIL ALERT PROFILE SECTION */}
+              <div className={styles.alertSection}>
+                <button
+                  className={styles.alertToggle}
+                  onClick={() => toggleAlert(acc.id)}
+                >
+                  <div className={styles.alertToggleLeft}>
+                    <Mail size={14} />
+                    <span>Email Alert Profile</span>
+                    {profile && (
+                      <span className={styles.alertConfigured}>Configured</span>
+                    )}
+                  </div>
+                  {isAlertOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+
+                {isAlertOpen && (
+                  <div className={styles.alertPanel}>
+                    <p className={styles.alertHint}>
+                      Link this account to your bank's email alerts so transactions can be auto-detected.
+                    </p>
+
+                    {/* Bank sender picker */}
+                    <div className={styles.alertField}>
+                      <label className={styles.alertLabel}>Bank Email Sender</label>
+                      <select
+                        className={styles.alertInput}
+                        value={form.emailSender}
+                        onChange={e => updateForm(acc.id, "emailSender", e.target.value)}
+                      >
+                        <option value="">Select your bank…</option>
+                        {KNOWN_SENDERS.map(s => (
+                          <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Custom sender input */}
+                    {form.emailSender === "__custom__" && (
+                      <div className={styles.alertField}>
+                        <label className={styles.alertLabel}>Custom Sender Email</label>
+                        <input
+                          type="email"
+                          className={styles.alertInput}
+                          placeholder="e.g. alerts@mybank.com"
+                          value={form.customSender}
+                          onChange={e => updateForm(acc.id, "customSender", e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    {/* Last 4 digits */}
+                    <div className={styles.alertField}>
+                      <label className={styles.alertLabel}>Account Last 4 Digits</label>
+                      <input
+                        type="text"
+                        className={styles.alertInput}
+                        placeholder="e.g. 1234"
+                        maxLength={4}
+                        value={form.last4}
+                        onChange={e => updateForm(acc.id, "last4", e.target.value.replace(/\D/g, ""))}
+                      />
+                      <span className={styles.alertInputHint}>Used to match SMS/email to this account</span>
+                    </div>
+
+                    {/* Feedback */}
+                    {alertMsgs[acc.id] && (
+                      <div className={styles.alertMsg} style={{
+                        color: alertMsgs[acc.id].startsWith("✓") ? "var(--success)" : "var(--danger)"
+                      }}>
+                        {alertMsgs[acc.id]}
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className={styles.alertActions}>
+                      <button
+                        className={styles.alertBtnCancel}
+                        onClick={() => setOpenAlertId(null)}
+                        disabled={isPending}
+                      >
+                        <X size={13} /> Cancel
+                      </button>
+                      <button
+                        className={styles.alertBtnSave}
+                        onClick={() => handleSaveAlert(acc.id)}
+                        disabled={isPending}
+                      >
+                        <Check size={13} /> Save Profile
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
             </div>
           );
         })}

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { signOut } from "@/app/login/actions";
 import { 
   User, DollarSign, Moon, Sun, Monitor, Tag, Download, LogOut,
-  Check, X, Pencil, Save
+  Check, X, Pencil, Save, Mail, Zap, Bot, RefreshCw, Clock
 } from "lucide-react";
 import styles from "@/components/dashboard/settings.module.css";
 import { useUIStore } from "@/store/useUIStore";
@@ -14,6 +15,11 @@ import {
   getUserProfileAction, 
   updateCurrencyAction 
 } from "@/app/actions/settings";
+import {
+  syncGmailAction,
+  getGmailStatusAction,
+  updateEmailSyncSettingsAction
+} from "@/app/actions/gmail";
 
 const CURRENCIES = [
   { code: "INR", symbol: "₹", label: "Indian Rupee (₹)" },
@@ -26,6 +32,7 @@ type ThemeMode = "light" | "dark" | "system";
 
 export function SettingsClient() {
   const { theme, setTheme, setCategoryManagerModalOpen } = useUIStore();
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   // Profile state
@@ -46,6 +53,14 @@ export function SettingsClient() {
   // Export state
   const [exportMsg, setExportMsg] = useState("");
 
+  // Gmail sync state
+  const [gmailStatus, setGmailStatus] = useState<any>(null);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [approvalRequired, setApprovalRequired] = useState(true);
+  const [regexEnabled, setRegexEnabled] = useState(true);
+  const [llmEnabled, setLlmEnabled] = useState(false);
+  const [syncInterval, setSyncInterval] = useState(60);
+
   // Load profile on mount
   useEffect(() => {
     getUserProfileAction().then((res) => {
@@ -54,6 +69,15 @@ export function SettingsClient() {
         setEmail(res.email || "");
         setSelectedCurrency(res.currencyCode || "INR");
         setProfileLoaded(true);
+      }
+    });
+    getGmailStatusAction().then((res) => {
+      setGmailStatus(res);
+      if (res.settings) {
+        setApprovalRequired(res.settings.approval_required ?? true);
+        setRegexEnabled(res.settings.regex_enabled ?? true);
+        setLlmEnabled(res.settings.llm_enabled ?? false);
+        setSyncInterval(res.settings.sync_interval_minutes ?? 60);
       }
     });
   }, []);
@@ -300,6 +324,179 @@ export function SettingsClient() {
 
         {/* RIGHT COLUMN */}
         <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
+
+          {/* GMAIL SYNC SECTION */}
+          <div className={styles.settingsSection}>
+            <div className={styles.sectionTitle}>GMAIL SYNC</div>
+            <div className={styles.listBlock}>
+
+              {/* Connection status */}
+              <div className={styles.listItem}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.blue}`}><Mail size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>Gmail Connection</div>
+                    <div className={styles.itemSubtitle}>
+                      {gmailStatus?.connected ? gmailStatus.email : "Not connected — sign in with Google"}
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.itemRight}>
+                  <span style={{ fontSize: "12px", fontWeight: 600, color: gmailStatus?.connected ? "var(--success)" : "var(--text-tertiary)" }}>
+                    {gmailStatus?.connected ? "● Connected" : "○ Disconnected"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Sync Now button */}
+              {gmailStatus?.connected && (
+                <div className={styles.listItem} onClick={() => {
+                  setSyncMsg("Syncing...");
+                  startTransition(async () => {
+                    const res = await syncGmailAction();
+                    if (res.error) {
+                      setSyncMsg(res.error);
+                    } else {
+                      setSyncMsg(`Synced! ${res.newTransactions} new, ${res.skipped} skipped`);
+                      router.refresh();
+                    }
+                    setTimeout(() => setSyncMsg(""), 5000);
+                  });
+                }}>
+                  <div className={styles.itemLeft}>
+                    <div className={`${styles.iconWrap} ${styles.green}`}>
+                      <RefreshCw size={18} className={isPending ? "spin" : ""} />
+                    </div>
+                    <div className={styles.itemText}>
+                      <div className={styles.itemTitle}>Sync Now</div>
+                      <div className={styles.itemSubtitle}>
+                        {syncMsg || (gmailStatus?.lastSync ? `Last: ${new Date(gmailStatus.lastSync).toLocaleString()}` : "Never synced")}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.itemRight}>
+                    <RefreshCw size={16} />
+                  </div>
+                </div>
+              )}
+
+              {/* Approval Required toggle */}
+              <div className={styles.listItem} onClick={() => {
+                const newVal = !approvalRequired;
+                setApprovalRequired(newVal);
+                const fd = new FormData();
+                fd.append("approval_required", String(newVal));
+                fd.append("regex_enabled", String(regexEnabled));
+                fd.append("llm_enabled", String(llmEnabled));
+                fd.append("sync_interval_minutes", String(syncInterval));
+                startTransition(() => updateEmailSyncSettingsAction(fd));
+              }}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.orange}`}><Check size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>Approval Required</div>
+                    <div className={styles.itemSubtitle}>Review transactions before saving</div>
+                  </div>
+                </div>
+                <div className={styles.itemRight}>
+                  <div className={`${styles.toggle} ${approvalRequired ? styles.toggleOn : ""}`}>
+                    <div className={styles.toggleKnob} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Regex Engine toggle */}
+              <div className={styles.listItem} onClick={() => {
+                const newVal = !regexEnabled;
+                setRegexEnabled(newVal);
+                const fd = new FormData();
+                fd.append("approval_required", String(approvalRequired));
+                fd.append("regex_enabled", String(newVal));
+                fd.append("llm_enabled", String(llmEnabled));
+                fd.append("sync_interval_minutes", String(syncInterval));
+                startTransition(() => updateEmailSyncSettingsAction(fd));
+              }}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.purple}`}><Zap size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>Regex Parser</div>
+                    <div className={styles.itemSubtitle}>Fast pattern matching (zero API cost)</div>
+                  </div>
+                </div>
+                <div className={styles.itemRight}>
+                  <div className={`${styles.toggle} ${regexEnabled ? styles.toggleOn : ""}`}>
+                    <div className={styles.toggleKnob} />
+                  </div>
+                </div>
+              </div>
+
+              {/* LLM Engine toggle */}
+              <div className={styles.listItem} onClick={() => {
+                const newVal = !llmEnabled;
+                setLlmEnabled(newVal);
+                const fd = new FormData();
+                fd.append("approval_required", String(approvalRequired));
+                fd.append("regex_enabled", String(regexEnabled));
+                fd.append("llm_enabled", String(newVal));
+                fd.append("sync_interval_minutes", String(syncInterval));
+                startTransition(() => updateEmailSyncSettingsAction(fd));
+              }}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.green}`}><Bot size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>AI Parser (Gemini)</div>
+                    <div className={styles.itemSubtitle}>Fallback for unrecognized emails (uses API)</div>
+                  </div>
+                </div>
+                <div className={styles.itemRight}>
+                  <div className={`${styles.toggle} ${llmEnabled ? styles.toggleOn : ""}`}>
+                    <div className={styles.toggleKnob} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Sync Interval */}
+              <div className={styles.listItem}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.gray}`}><Clock size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>Auto-Sync Interval</div>
+                    <div className={styles.itemSubtitle}>How often to check for new emails</div>
+                  </div>
+                </div>
+                <div className={styles.itemRight}>
+                  <select
+                    value={syncInterval}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setSyncInterval(val);
+                      const fd = new FormData();
+                      fd.append("approval_required", String(approvalRequired));
+                      fd.append("regex_enabled", String(regexEnabled));
+                      fd.append("llm_enabled", String(llmEnabled));
+                      fd.append("sync_interval_minutes", String(val));
+                      startTransition(() => updateEmailSyncSettingsAction(fd));
+                    }}
+                    style={{
+                      padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--border)",
+                      background: "var(--surface)", fontSize: "13px", color: "var(--text-primary)",
+                      fontFamily: "inherit", cursor: "pointer"
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <option value={0}>Manual Only</option>
+                    <option value={30}>Every 30 min</option>
+                    <option value={60}>Every 1 hour</option>
+                    <option value={180}>Every 3 hours</option>
+                    <option value={360}>Every 6 hours</option>
+                    <option value={720}>Every 12 hours</option>
+                  </select>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
           <div className={styles.settingsSection}>
             <div className={styles.sectionTitle}>DATA</div>
             <div className={styles.listBlock}>

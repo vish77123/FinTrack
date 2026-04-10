@@ -8,6 +8,8 @@ import TransactionList from "@/components/dashboard/TransactionList";
 import SpendingChart from "@/components/dashboard/SpendingChart";
 import SavingsGoals from "@/components/dashboard/SavingsGoals";
 import { DashboardModals } from "@/components/dashboard/DashboardModals";
+import { PendingTransactions } from "@/components/dashboard/PendingTransactions";
+import { getPendingTransactionsAction } from "@/app/actions/gmail";
 import styles from "@/components/dashboard/dashboard.module.css";
 
 export default async function DashboardPage() {
@@ -32,6 +34,7 @@ export default async function DashboardPage() {
   }
 
   const dashboardData = await getDashboardData();
+  const { transactions: pendingTxns } = await getPendingTransactionsAction();
 
   return (
     <div>
@@ -46,6 +49,12 @@ export default async function DashboardPage() {
       />
       
       <PendingTray items={dashboardData.pendingTransactions} currency={dashboardData.currency} />
+
+      {pendingTxns.length > 0 && (
+        <div style={{ marginTop: "24px" }}>
+          <PendingTransactions transactions={pendingTxns} currency={dashboardData.currency} />
+        </div>
+      )}
       
       <AccountCards accounts={dashboardData.accounts} currency={dashboardData.currency} />
       
