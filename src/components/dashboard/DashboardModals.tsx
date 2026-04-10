@@ -4,6 +4,7 @@ import { useUIStore } from "@/store/useUIStore";
 import { AddTransactionModal } from "@/components/ui/AddTransactionModal";
 import { AddAccountModal } from "@/components/ui/AddAccountModal";
 import { AddGoalModal } from "@/components/ui/AddGoalModal";
+import { CategoryManagerModal } from "@/components/ui/CategoryManagerModal";
 
 interface DashboardModalsProps {
   accounts: any[];
@@ -14,7 +15,8 @@ export function DashboardModals({ accounts, categories = [] }: DashboardModalsPr
   const { 
     isTransactionModalOpen, setTransactionModalOpen,
     isAddGoalModalOpen, setAddGoalModalOpen,
-    isAddAccountModalOpen, setAddAccountModalOpen
+    isAddAccountModalOpen, setAddAccountModalOpen,
+    isCategoryManagerModalOpen, setCategoryManagerModalOpen
   } = useUIStore();
   
   return (
@@ -34,6 +36,12 @@ export function DashboardModals({ accounts, categories = [] }: DashboardModalsPr
       <AddGoalModal 
         isOpen={isAddGoalModalOpen}
         onClose={() => setAddGoalModalOpen(false)}
+      />
+
+      <CategoryManagerModal
+        isOpen={isCategoryManagerModalOpen}
+        onClose={() => setCategoryManagerModalOpen(false)}
+        categories={categories}
       />
     </>
   );

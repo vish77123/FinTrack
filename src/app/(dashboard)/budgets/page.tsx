@@ -28,7 +28,7 @@ export default async function BudgetsPage() {
       ) : (
         <BudgetsView goals={data.savingsGoals} currency={data.currency} />
       )}
-      <DashboardModals accounts={data.accounts} />
+      <DashboardModals accounts={data.accounts} categories={(data as any).categories || []} />
     </>
   );
 }

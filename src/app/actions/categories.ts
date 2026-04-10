@@ -56,3 +56,33 @@ export async function addCategoryAction(formData: FormData) {
 
   return { success: true, categoryId: data.id };
 }
+
+export async function deleteCategoryAction(id: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Unauthorized" };
+  }
+
+  const { error: dbError } = await supabase
+    .from("categories")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (dbError) {
+    console.error("Delete category error:", dbError);
+    if (dbError.code === "23503") { // Postgres foreign key violation
+      return { error: "Cannot delete category because it is used in existing transactions." };
+    }
+    return { error: "Failed to delete category." };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/transactions");
+  revalidatePath("/budgets");
+  revalidatePath("/settings");
+
+  return { success: true };
+}

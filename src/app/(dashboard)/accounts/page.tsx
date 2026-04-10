@@ -29,7 +29,7 @@ export default async function AccountsPage() {
         <AccountsView accounts={data.accounts} netWorth={data.netWorth} currency={data.currency} />
       )}
       
-      <DashboardModals accounts={data.accounts} />
+      <DashboardModals accounts={data.accounts} categories={(data as any).categories || []} />
     </>
   );
 }

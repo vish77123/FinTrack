@@ -5,11 +5,13 @@ interface UIState {
   isTransactionModalOpen: boolean;
   isAddGoalModalOpen: boolean;
   isAddAccountModalOpen: boolean;
+  isCategoryManagerModalOpen: boolean;
   setTheme: (theme: "light" | "dark") => void;
   toggleTheme: () => void;
   setTransactionModalOpen: (isOpen: boolean) => void;
   setAddGoalModalOpen: (isOpen: boolean) => void;
   setAddAccountModalOpen: (isOpen: boolean) => void;
+  setCategoryManagerModalOpen: (isOpen: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -17,6 +19,7 @@ export const useUIStore = create<UIState>((set) => ({
   isTransactionModalOpen: false,
   isAddGoalModalOpen: false,
   isAddAccountModalOpen: false,
+  isCategoryManagerModalOpen: false,
   setTheme: (theme) => {
     if (typeof window !== "undefined") localStorage.setItem("theme", theme);
     set({ theme });
@@ -30,4 +33,5 @@ export const useUIStore = create<UIState>((set) => ({
   setTransactionModalOpen: (isOpen) => set({ isTransactionModalOpen: isOpen }),
   setAddGoalModalOpen: (isOpen) => set({ isAddGoalModalOpen: isOpen }),
   setAddAccountModalOpen: (isOpen) => set({ isAddAccountModalOpen: isOpen }),
+  setCategoryManagerModalOpen: (isOpen) => set({ isCategoryManagerModalOpen: isOpen }),
 }));
