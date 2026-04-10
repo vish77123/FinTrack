@@ -1,7 +1,7 @@
 .container {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 24px;
 }
 
 /* HEADER */
@@ -9,132 +9,278 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .pageTitle {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .pageSubtitle {
   color: var(--text-secondary);
-  font-size: 15px;
-}
-
-.btnAdd {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--accent);
-  background: transparent;
-  border: none;
   font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s ease;
 }
 
-.btnAdd:hover {
-  background: var(--accent-light);
-}
-
-/* CARDS */
-.goalsGrid {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.goalCard {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.cardHeader {
+.headerActions {
   display: flex;
   align-items: center;
+  gap: 12px;
+}
+
+.periodToggle {
+  display: flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.toggleBtn {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: calc(var(--radius-sm) - 4px);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.toggleBtn.active {
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* SUMMARY CARDS */
+.summaryGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 16px;
 }
 
-.iconWrap {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: var(--bg);
+.summaryCard {
+  background: var(--surface);
   border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+}
+
+.summaryLabel {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+
+.summaryValue {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.textAccent { color: var(--accent); }
+.textDanger { color: var(--danger); }
+.textSuccess { color: var(--success); }
+
+.summaryMeta {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.summaryProgress {
+  height: 6px;
+  background: var(--bg);
+  border-radius: 3px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.summaryProgressFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+/* BUDGET CARDS GRID */
+.budgetGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.budgetCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: box-shadow 0.2s ease;
+}
+
+.budgetCard:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.cardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.cardLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.catIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: 18px;
+  border: 1px solid;
+  flex-shrink: 0;
 }
 
-.goalInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.goalName {
-  font-size: 16px;
+.catName {
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.goalTargetDate {
-  font-size: 13px;
+.catPeriod {
+  font-size: 12px;
   color: var(--text-tertiary);
+  margin-top: 2px;
 }
 
-.progressStats {
+.cardRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badgeNormal {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.badgeWarning {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #FFF3E0;
+  color: #FF9500;
+}
+
+.badgeDanger {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.deleteBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.2s ease;
+}
+
+.budgetCard:hover .deleteBtn {
+  opacity: 1;
+}
+
+.deleteBtn:hover {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.cardAmounts {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: -12px;
 }
 
-.savedAmount {
-  font-size: 16px;
+.spentAmount {
+  font-size: 18px;
   font-weight: 700;
-  color: var(--text-primary);
 }
 
-.targetAmount {
+.limitAmount {
   font-size: 13px;
   color: var(--text-tertiary);
 }
 
-.progressBarContainer {
-  height: 8px;
+.barTrack {
+  height: 6px;
   background: var(--bg);
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
 }
 
-.progressBarFill {
+.barFill {
   height: 100%;
-  background: var(--accent);
-  border-radius: 4px;
-  transition: width 0.5s ease-out;
+  border-radius: 3px;
+  transition: width 0.5s ease;
 }
 
-.footerStats {
-  font-size: 13px;
+.cardFooter {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* EMPTY STATE */
+.emptyState {
+  text-align: center;
+  padding: 60px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.emptyState h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.emptyState p {
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
 /* ==================== MOBILE RESPONSIVE ==================== */
 @media (max-width: 768px) {
   .container {
-    gap: 20px;
+    gap: 16px;
   }
 
   .headerRow {
@@ -146,23 +292,57 @@
     font-size: 22px;
   }
 
-  .goalCard {
-    padding: 16px;
-    gap: 16px;
+  .pageSubtitle {
+    font-size: 13px;
   }
 
-  .iconWrap {
-    width: 40px;
-    height: 40px;
+  .headerActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .summaryGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .summaryCard {
+    padding: 16px;
+  }
+
+  .summaryValue {
     font-size: 20px;
   }
 
-  .goalName {
+  .budgetGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .budgetCard {
+    padding: 16px;
+    gap: 10px;
+  }
+
+  .catIcon {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+
+  .catName {
     font-size: 14px;
   }
 
-  .savedAmount {
-    font-size: 14px;
+  .spentAmount {
+    font-size: 16px;
+  }
+
+  .deleteBtn {
+    opacity: 1;
+  }
+
+  .emptyState {
+    padding: 40px 16px;
   }
 }
-
