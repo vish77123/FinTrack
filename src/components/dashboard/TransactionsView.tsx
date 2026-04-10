@@ -25,7 +25,8 @@ export default function TransactionsView({ transactions, currency, categories = 
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [customDateRange, setCustomDateRange] = useState({ start: "", end: "" });
 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -104,9 +105,37 @@ export default function TransactionsView({ transactions, currency, categories = 
           if (accountFilter !== "all" && txn.account !== accountFilter) return false;
 
           // Date filter
-          if (dateFilter) {
-            const txnDate = txn.date ? new Date(txn.date).toISOString().split("T")[0] : "";
-            if (txnDate !== dateFilter) return false;
+          if (dateFilter !== "all") {
+            const txnDateRaw = txn.date ? new Date(txn.date) : null;
+            if (!txnDateRaw) return false;
+            
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            if (dateFilter === "today") {
+              const txnDay = new Date(txnDateRaw);
+              txnDay.setHours(0, 0, 0, 0);
+              if (txnDay.getTime() !== today.getTime()) return false;
+            } else if (dateFilter === "week") {
+              const startOfWeek = new Date(today);
+              startOfWeek.setDate(today.getDate() - today.getDay());
+              if (txnDateRaw < startOfWeek) return false;
+            } else if (dateFilter === "month") {
+              if (txnDateRaw.getMonth() !== today.getMonth() || txnDateRaw.getFullYear() !== today.getFullYear()) {
+                return false;
+              }
+            } else if (dateFilter === "custom") {
+              if (customDateRange.start) {
+                const start = new Date(customDateRange.start);
+                start.setHours(0, 0, 0, 0);
+                if (txnDateRaw < start) return false;
+              }
+              if (customDateRange.end) {
+                const end = new Date(customDateRange.end);
+                end.setHours(23, 59, 59, 999);
+                if (txnDateRaw > end) return false;
+              }
+            }
           }
 
           return true;
@@ -117,7 +146,7 @@ export default function TransactionsView({ transactions, currency, categories = 
         return { ...group, transactions: filteredTxns };
       })
       .filter(Boolean);
-  }, [transactions, typeFilter, searchQuery, categoryFilter, accountFilter, dateFilter]);
+  }, [transactions, typeFilter, searchQuery, categoryFilter, accountFilter, dateFilter, customDateRange]);
 
   // CSV Export
   const handleExportCSV = () => {
@@ -217,12 +246,35 @@ export default function TransactionsView({ transactions, currency, categories = 
         </div>
 
         <div className={styles.dropdownFilters}>
-          <input
-            type="date"
+          <select
             className={styles.filterDropdown}
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value)}
-          />
+          >
+            <option value="all">All Time</option>
+            <option value="today">Today</option>
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+            <option value="custom">Custom Range...</option>
+          </select>
+
+          {dateFilter === "custom" && (
+            <div className={styles.dateRangeWrapper}>
+              <input 
+                type="date" 
+                className={styles.dateInput} 
+                value={customDateRange.start} 
+                onChange={e => setCustomDateRange(p => ({ ...p, start: e.target.value }))} 
+              />
+              <span className={styles.dateSeparator}>-</span>
+              <input 
+                type="date" 
+                className={styles.dateInput} 
+                value={customDateRange.end} 
+                onChange={e => setCustomDateRange(p => ({ ...p, end: e.target.value }))} 
+              />
+            </div>
+          )}
           <select
             className={styles.filterDropdown}
             value={categoryFilter}

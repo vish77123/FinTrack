@@ -36,6 +36,7 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
   const [type, setType] = useState<"income" | "expense" | "transfer">("expense");
   const [amount, setAmount] = useState("");
   const [accountId, setAccountId] = useState(availableAccounts[0]?.id || "");
+  const [toAccountId, setToAccountId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [note, setNote] = useState("");
@@ -49,6 +50,10 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
       return setErrorMsg("Please enter a valid amount.");
     }
     if (!accountId) return setErrorMsg("Please select an account.");
+    if (type === "transfer") {
+      if (!toAccountId) return setErrorMsg("Please select a destination account.");
+      if (accountId === toAccountId) return setErrorMsg("Source and destination accounts must be different.");
+    }
 
     setIsSubmitting(true);
 
@@ -56,9 +61,13 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
     formData.append("amount", amount);
     formData.append("type", type);
     formData.append("account_id", accountId);
+    
+    if (type === "transfer") {
+      formData.append("transfer_to_account_id", toAccountId);
+    }
 
-    // Only send category_id if it's a real database UUID — skip hardcoded fallback IDs
-    if (categoryId && UUID_REGEX.test(categoryId)) {
+    // Only send category_id for non-transfers if it's a real database UUID — skip hardcoded fallback IDs
+    if (type !== "transfer" && categoryId && UUID_REGEX.test(categoryId)) {
       formData.append("category_id", categoryId);
     }
 
@@ -74,6 +83,7 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
       setAmount("");
       setNote("");
       setCategoryId("");
+      setToAccountId("");
       setIsSubmitting(false);
       onClose();
       router.refresh();
@@ -113,29 +123,64 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
 
       <CurrencyInput value={amount} onChange={setAmount} currency="₹" />
 
-      <div className={styles.formGroup}>
-        <label className={styles.inputLabel}>Account</label>
-        <select
-          className={`${styles.formInput} ${styles.formSelect}`}
-          value={accountId}
-          onChange={(e) => setAccountId(e.target.value)}
-        >
-          <option value="" disabled>Select an account</option>
-          {availableAccounts.map(acc => (
-            <option key={acc.id} value={acc.id}>
-              {acc.name} (₹{(acc.balance || 0).toLocaleString("en-IN")})
-            </option>
-          ))}
-        </select>
-      </div>
+      {type === "transfer" ? (
+        <div style={{ display: "flex", gap: "12px", width: "100%" }}>
+          <div className={styles.formGroup} style={{ flex: 1 }}>
+            <label className={styles.inputLabel}>From Account</label>
+            <select
+              className={`${styles.formInput} ${styles.formSelect}`}
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+            >
+              {availableAccounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.formGroup} style={{ flex: 1 }}>
+            <label className={styles.inputLabel}>To Account</label>
+            <select
+              className={`${styles.formInput} ${styles.formSelect}`}
+              value={toAccountId}
+              onChange={(e) => setToAccountId(e.target.value)}
+            >
+              <option value="" disabled>Select destination</option>
+              {availableAccounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className={styles.formGroup}>
+            <label className={styles.inputLabel}>Account</label>
+            <select
+              className={`${styles.formInput} ${styles.formSelect}`}
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+            >
+              {availableAccounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} (₹{(acc.balance || 0).toLocaleString("en-IN")})
+                </option>
+              ))}
+            </select>
+          </div>
 
-      <CategoryPicker 
-        label="Category (Optional)"
-        categories={categories}
-        value={categoryId}
-        onChange={setCategoryId}
-        transactionType={type}
-      />
+          <CategoryPicker 
+            label="Category (Optional)"
+            categories={categories}
+            value={categoryId}
+            onChange={setCategoryId}
+            transactionType={type}
+          />
+        </>
+      )}
 
       <div className={styles.formGroup}>
         <label className={styles.inputLabel}>Date</label>

@@ -52,7 +52,7 @@ const navItems = [
         ),
       },
       {
-        label: "Budgets",
+        label: "Goals",
         href: "/budgets",
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -96,7 +96,7 @@ const bottomNavItems = [
   { label: "Home", href: "/dashboard", Icon: Home },
   { label: "Transactions", href: "/transactions", Icon: DollarSign },
   { label: "add", href: "#", Icon: Plus }, // FAB placeholder
-  { label: "Budgets", href: "/budgets", Icon: PieChart },
+  { label: "Goals", href: "/budgets", Icon: PieChart },
   { label: "Reports", href: "/reports", Icon: BarChart3 },
 ];
 

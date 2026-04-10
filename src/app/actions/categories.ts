@@ -67,15 +67,12 @@ export async function deleteCategoryAction(id: string) {
 
   const { error: dbError } = await supabase
     .from("categories")
-    .delete()
+    .update({ sort_order: -9999 })
     .eq("id", id)
     .eq("user_id", user.id);
 
   if (dbError) {
     console.error("Delete category error:", dbError);
-    if (dbError.code === "23503") { // Postgres foreign key violation
-      return { error: "Cannot delete category because it is used in existing transactions." };
-    }
     return { error: "Failed to delete category." };
   }
 

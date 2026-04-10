@@ -1,12 +1,12 @@
-import { getDashboardData } from "@/lib/data/dashboard";
+import { getReportsData } from "@/lib/data/dashboard";
 import ReportsView from "@/components/dashboard/ReportsView";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LineChart } from "lucide-react";
 import styles from "@/components/dashboard/dashboard.module.css";
 
 export default async function ReportsPage() {
-  const data = await getDashboardData();
-  const hasData = data.spendingData && data.spendingData.length > 0;
+  const { transactions, currency } = await getReportsData();
+  const hasData = transactions.length > 0;
 
   return (
     <>
@@ -25,7 +25,7 @@ export default async function ReportsPage() {
           />
         </div>
       ) : (
-        <ReportsView spendingData={data.spendingData} currency={data.currency} />
+        <ReportsView transactions={transactions} currency={currency} />
       )}
     </>
   );

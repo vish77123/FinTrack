@@ -47,7 +47,7 @@ export async function getDashboardData() {
     // 4. Fetch Categories for use in Transaction modal
     const { data: categoriesRaw } = await supabase
       .from("categories")
-      .select("id, name, icon, color, type")
+      .select("id, name, icon, color, type, sort_order")
       .eq("user_id", user.id)
       .order("sort_order", { ascending: true });
 
@@ -60,7 +60,7 @@ export async function getDashboardData() {
          expenses: 0,
          savings: 0,
          accounts: [],
-         categories: categoriesRaw || [],
+         categories: (categoriesRaw || []).filter((c: any) => c.sort_order !== -9999),
          recentTransactions: [],
          savingsGoals: [],
          spendingData: []
@@ -178,7 +178,7 @@ export async function getDashboardData() {
       savings: totalSavings,
       pendingTransactions: mockData.pendingTransactions,
       accounts: formattedAccounts,
-      categories: categoriesRaw || [],
+      categories: (categoriesRaw || []).filter((c: any) => c.sort_order !== -9999),
       recentTransactions: groupedTxns,
       savingsGoals: formattedGoals,
       spendingData: formattedSpending.length > 0 ? formattedSpending : []
@@ -191,4 +191,48 @@ export async function getDashboardData() {
       ...mockData, accounts: [], recentTransactions: [], savingsGoals: [], spendingData: []
     };
   }
+}
+
+/**
+ * Fetch ALL transactions for the Reports page (no limit).
+ * Returns a flat array of transaction objects with category/account metadata.
+ */
+export async function getReportsData() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const isPlaceholder = supabaseUrl.includes("placeholder");
+
+  if (isPlaceholder) {
+    return { transactions: [], currency: "₹" };
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Unauthorized");
+  }
+
+  const { data: txns } = await supabase
+    .from("transactions")
+    .select(`
+      id, amount, type, date, note,
+      categories(name, color, icon),
+      accounts!transactions_account_id_fkey(name)
+    `)
+    .eq("user_id", user.id)
+    .order("date", { ascending: false });
+
+  const transactions = (txns || []).map(txn => ({
+    id: txn.id,
+    date: txn.date,
+    merchant: txn.note || (txn.categories ? (txn.categories as any).name : "Transaction"),
+    category: txn.categories ? (txn.categories as any).name : "General",
+    amount: Number(txn.amount),
+    type: txn.type,
+    account: txn.accounts ? (txn.accounts as any).name : "Account",
+    icon: (txn.categories as any)?.icon,
+    color: (txn.categories as any)?.color,
+  }));
+
+  return { transactions, currency: "₹" };
 }

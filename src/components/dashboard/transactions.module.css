@@ -138,6 +138,42 @@
   padding-right: 32px;
 }
 
+.dateInput {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  outline: none;
+}
+
+.dateInput:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+.dateRangeWrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 2px 4px;
+  border-radius: 24px;
+}
+
+.dateSeparator {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
 .filterDropdown:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-light);
@@ -376,9 +412,8 @@
 
   .dropdownFilters {
     width: 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    flex-wrap: wrap; /* allow custom date wrapper to drop to new line seamlessly */
+    justify-content: flex-start;
   }
 
   .dropdownFilters::-webkit-scrollbar {
