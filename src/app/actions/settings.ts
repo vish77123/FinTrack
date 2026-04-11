@@ -119,3 +119,38 @@ export async function updateCurrencyAction(currencyCode: string) {
 
   return { success: true };
 }
+
+export async function resetUserAccountAction() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "You must be logged in." };
+  }
+
+  try {
+    // Delete everything. CASCADEs will help but explicit deletes are safe.
+    await supabase.from("transactions").delete().eq("user_id", user.id);
+    await supabase.from("accounts").delete().eq("user_id", user.id);
+    await supabase.from("budgets").delete().eq("user_id", user.id);
+    await supabase.from("categories").delete().eq("user_id", user.id);
+    await supabase.from("savings_goals").delete().eq("user_id", user.id);
+
+    // Re-seed default categories
+    const defaultCategories = [
+      { user_id: user.id, name: 'Income', icon: '💰', color: '#34C759', type: 'income', sort_order: 1 },
+      { user_id: user.id, name: 'Food', icon: '🍔', color: '#FF9500', type: 'expense', sort_order: 2 },
+      { user_id: user.id, name: 'Transport', icon: '🚗', color: '#636366', type: 'expense', sort_order: 3 },
+      { user_id: user.id, name: 'Housing', icon: '🏠', color: '#6C63FF', type: 'expense', sort_order: 4 },
+      { user_id: user.id, name: 'Entertainment', icon: '🎬', color: '#FF3B30', type: 'expense', sort_order: 5 },
+    ];
+    await supabase.from("categories").insert(defaultCategories);
+
+    revalidatePath("/", "layout");
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error resetting account:", err);
+    return { error: err.message || "Failed to reset account." };
+  }
+}

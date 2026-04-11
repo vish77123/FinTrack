@@ -57,6 +57,7 @@ export async function getDashboardData() {
        return {
          ...mockData,
          netWorth: 0,
+         todaySpent: 0,
          income: 0,
          expenses: 0,
          savings: 0,

@@ -5,15 +5,17 @@ import { useRouter } from "next/navigation";
 import { signOut } from "@/app/login/actions";
 import { 
   User, DollarSign, Moon, Sun, Monitor, Tag, Download, LogOut,
-  Check, X, Pencil, Save, Mail, Zap, Bot, RefreshCw, Clock, Key, Sparkles, Eye, EyeOff
+  Check, X, Pencil, Save, Mail, Zap, Bot, RefreshCw, Clock, Key, Sparkles, Eye, EyeOff, AlertTriangle
 } from "lucide-react";
 import styles from "@/components/dashboard/settings.module.css";
 import { useUIStore } from "@/store/useUIStore";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { 
   updateProfileAction, 
   exportAllTransactionsAction, 
   getUserProfileAction, 
-  updateCurrencyAction 
+  updateCurrencyAction,
+  resetUserAccountAction
 } from "@/app/actions/settings";
 import {
   syncGmailAction,
@@ -50,8 +52,10 @@ export function SettingsClient() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(theme === "dark" ? "dark" : "light");
   const [showThemePicker, setShowThemePicker] = useState(false);
 
-  // Export state
+  // Export & Reset state
   const [exportMsg, setExportMsg] = useState("");
+  const [resetMsg, setResetMsg] = useState("");
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
 
   // Gmail sync state
   const [gmailStatus, setGmailStatus] = useState<any>(null);
@@ -147,6 +151,26 @@ export function SettingsClient() {
         URL.revokeObjectURL(url);
         setExportMsg("Export downloaded!");
         setTimeout(() => setExportMsg(""), 3000);
+      }
+    });
+  };
+
+  const handleResetAccountClick = () => {
+    setIsResetConfirmOpen(true);
+  };
+
+  const handleResetAccountConfirm = () => {
+    setIsResetConfirmOpen(false);
+    setResetMsg("Resetting account...");
+    startTransition(async () => {
+      const res = await resetUserAccountAction();
+      if (res.error) {
+        setResetMsg(`Error: ${res.error}`);
+      } else {
+        setResetMsg("Account reset successfully. Redirecting...");
+        // The action revalidates the layout, we should refresh the router.
+        router.push("/dashboard");
+        router.refresh();
       }
     });
   };
@@ -495,6 +519,20 @@ export function SettingsClient() {
                 </div>
                 <div className={styles.itemRight}><Download size={16} /></div>
               </div>
+
+              {/* RESET ACCOUNT */}
+              <div className={styles.listItem} onClick={handleResetAccountClick}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap}`} style={{ color: "var(--danger)", background: "var(--danger-light)" }}><AlertTriangle size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle} style={{ color: "var(--danger)" }}>Reset Account</div>
+                    <div className={styles.itemSubtitle} style={{ color: resetMsg.includes("Error") ? "var(--danger)" : "var(--text-tertiary)" }}>
+                      {resetMsg || "Permanently delete all data"}
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.itemRight} style={{ color: "var(--danger)" }}><AlertTriangle size={16} /></div>
+              </div>
             </div>
           </div>
 
@@ -512,6 +550,17 @@ export function SettingsClient() {
         </div>
 
       </div>
+
+      <ConfirmDialog
+        isOpen={isResetConfirmOpen}
+        onConfirm={handleResetAccountConfirm}
+        onCancel={() => setIsResetConfirmOpen(false)}
+        title="Reset Account"
+        message="Are you sure you want to reset your account? This will permanently delete all your accounts, transactions, budgets, goals, and categories. This action cannot be undone."
+        confirmText="Reset Account"
+        variant="danger"
+        isPending={isPending}
+      />
     </div>
   );
 }

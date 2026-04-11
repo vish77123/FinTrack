@@ -28,29 +28,12 @@ export default async function AccountsPage() {
 
   return (
     <>
-      {!hasAccounts ? (
-        <div className={styles.section}>
-          <div className={styles.pageHeader}>
-            <div>
-              <h1>Accounts</h1>
-              <p>Manage your bank accounts, cards, and wallets.</p>
-            </div>
-          </div>
-          <EmptyState 
-            icon={<Landmark size={48} />}
-            title="No accounts found"
-            description="Add your bank accounts, credit cards, or cash wallets to get started."
-          />
-        </div>
-      ) : (
-        <AccountsView
-          accounts={data.accounts}
-          netWorth={data.netWorth}
-          currency={data.currency}
-          alertProfiles={alertProfiles}
-        />
-      )}
-      
+      <AccountsView
+        accounts={data.accounts}
+        netWorth={data.netWorth}
+        currency={data.currency}
+        alertProfiles={alertProfiles}
+      />
       <DashboardModals accounts={data.accounts} categories={(data as any).categories || []} />
     </>
   );

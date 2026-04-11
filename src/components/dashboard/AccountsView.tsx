@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useUIStore } from "@/store/useUIStore";
 import { Plus, Pencil, Mail, ChevronDown, ChevronUp, Check, X } from "lucide-react";
 import { EditAccountModal } from "@/components/ui/EditAccountModal";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Landmark } from "lucide-react";
 import { saveAlertProfileAction } from "@/app/actions/gmail";
 import styles from "./accounts.module.css";
 
@@ -154,18 +156,31 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
       </div>
 
       {/* HERO BANNER - Total Net Worth */}
-      <div className={styles.heroBanner}>
-        <div className={styles.heroLabel}>
-          <span className={styles.heroLabelSpan}></span> Total Net Worth
+      {accounts.length > 0 && (
+        <div className={styles.heroBanner}>
+          <div className={styles.heroLabel}>
+            <span className={styles.heroLabelSpan}></span> Total Net Worth
+          </div>
+          <div className={styles.heroAmount}>{formatCurrency(netWorth)}</div>
+          <div className={styles.heroSubtext}>
+            Across {accounts.length} account{accounts.length !== 1 ? "s" : ""}
+          </div>
         </div>
-        <div className={styles.heroAmount}>{formatCurrency(netWorth)}</div>
-        <div className={styles.heroSubtext}>
-          Across {accounts.length} account{accounts.length !== 1 ? "s" : ""}
-        </div>
-      </div>
+      )}
 
-      {/* ACCOUNTS GRID */}
-      <div className={styles.cardsGrid}>
+      {/* ACCOUNTS GRID OR EMPTY STATE */}
+      {accounts.length === 0 ? (
+        <div style={{ marginTop: '48px' }}>
+          <EmptyState 
+            icon={<Landmark size={48} />}
+            title="No accounts found"
+            description="Add your bank accounts, credit cards, or cash wallets to get started."
+            actionLabel="Add Account"
+            onAction={() => setAddAccountModalOpen(true)}
+          />
+        </div>
+      ) : (
+        <div className={styles.cardsGrid}>
         
         {accounts.map((acc: any) => {
           const isNegative = acc.balance < 0;
@@ -317,8 +332,8 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
           <Plus size={24} />
           <span>Add New Account</span>
         </div>
-
-      </div>
+        </div>
+      )}
 
       {/* Edit Account Modal */}
       <EditAccountModal
