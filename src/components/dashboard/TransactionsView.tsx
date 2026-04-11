@@ -108,7 +108,7 @@ export default function TransactionsView({ transactions, currency, categories = 
           if (dateFilter !== "all") {
             const txnDateRaw = txn.date ? new Date(txn.date) : null;
             if (!txnDateRaw) return false;
-            
+
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
@@ -260,18 +260,18 @@ export default function TransactionsView({ transactions, currency, categories = 
 
           {dateFilter === "custom" && (
             <div className={styles.dateRangeWrapper}>
-              <input 
-                type="date" 
-                className={styles.dateInput} 
-                value={customDateRange.start} 
-                onChange={e => setCustomDateRange(p => ({ ...p, start: e.target.value }))} 
+              <input
+                type="date"
+                className={styles.dateInput}
+                value={customDateRange.start}
+                onChange={e => setCustomDateRange(p => ({ ...p, start: e.target.value }))}
               />
               <span className={styles.dateSeparator}>-</span>
-              <input 
-                type="date" 
-                className={styles.dateInput} 
-                value={customDateRange.end} 
-                onChange={e => setCustomDateRange(p => ({ ...p, end: e.target.value }))} 
+              <input
+                type="date"
+                className={styles.dateInput}
+                value={customDateRange.end}
+                onChange={e => setCustomDateRange(p => ({ ...p, end: e.target.value }))}
               />
             </div>
           )}
@@ -316,17 +316,17 @@ export default function TransactionsView({ transactions, currency, categories = 
                   {group.dailyExpense > 0 && <span className={styles.textDanger}>-{formatCurrency(group.dailyExpense, 'expense').replace('− ', '')}</span>}
                 </div>
               </div>
-              
+
               <div className={styles.groupItems}>
                 {group.transactions.map((txn: any) => {
                   const isExpense = txn.type === "expense";
-                  
+
                   return (
                     <div key={txn.id} className={styles.transactionRow} style={{ opacity: isPending ? 0.6 : 1 }}>
-                      
+
                       {/* Left: Icon, Title, Subtitle */}
                       <div className={styles.rowLeft}>
-                        <div 
+                        <div
                           className={styles.txnIconWrap}
                           style={txn.color ? { backgroundColor: `${txn.color}15`, color: txn.color, borderColor: `${txn.color}30` } : undefined}
                         >
@@ -334,7 +334,9 @@ export default function TransactionsView({ transactions, currency, categories = 
                         </div>
                         <div className={styles.txnDetails}>
                           <div className={styles.txnTitle}>{txn.merchant}</div>
-                          <div className={styles.txnSubtitle}>{txn.note || txn.category}</div>
+                          <div className={styles.txnSubtitle}>
+                            <span>{txn.category || txn.note || "Uncategorized"}</span>
+                          </div>
                         </div>
                       </div>
 

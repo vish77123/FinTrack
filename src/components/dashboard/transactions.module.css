@@ -202,9 +202,9 @@
 }
 
 .dateHeader {
-  padding: 12px 20px;
+  padding: 10px 18px;
   background: var(--card);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
@@ -215,8 +215,8 @@
 
 .dateHeaderTotals {
   display: flex;
-  gap: 12px;
-  font-size: 13px;
+  gap: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -237,7 +237,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
+  padding: 10px 18px;
   border-bottom: 1px solid var(--border);
   transition: background 0.15s ease;
 }
@@ -254,35 +254,35 @@
 .rowLeft {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .txnIconWrap {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: var(--bg);
   border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 17px;
 }
 
 .txnDetails {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .txnTitle {
   font-weight: 500;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .txnSubtitle {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-tertiary);
 }
 
@@ -290,7 +290,7 @@
 .rowRight {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
 }
 
 .typeBadge {
@@ -320,7 +320,7 @@
 
 .txnAmount {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .textDanger { color: var(--danger); }
@@ -336,7 +336,7 @@
   border: none;
   color: var(--text-tertiary);
   cursor: pointer;
-  padding: 8px;
+  padding: 6px;
   border-radius: var(--radius-sm);
   transition: all 0.15s ease;
   display: flex;
@@ -357,20 +357,20 @@
 /* ==================== MOBILE RESPONSIVE ==================== */
 @media (max-width: 768px) {
   .container {
-    gap: 20px;
+    gap: 16px;
   }
 
   .headerRow {
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
   }
 
   .pageTitle {
-    font-size: 22px;
+    font-size: 20px;
   }
 
   .pageSubtitle {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .headerActions {
@@ -386,17 +386,19 @@
 
   .searchInput {
     width: 100%;
+    padding: 8px 12px 8px 34px;
+    font-size: 13px;
   }
 
   .btnSecondary {
     padding: 8px 12px;
-    font-size: 13px;
+    font-size: 12px;
   }
 
   /* FILTERS */
   .filterRow {
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
 
   .segmentedToggle {
@@ -404,16 +406,17 @@
   }
 
   .toggleBtn {
-    padding: 6px 12px;
-    font-size: 13px;
+    padding: 6px 10px;
+    font-size: 12px;
     flex: 1;
     text-align: center;
   }
 
   .dropdownFilters {
     width: 100%;
-    flex-wrap: wrap; /* allow custom date wrapper to drop to new line seamlessly */
+    flex-wrap: wrap;
     justify-content: flex-start;
+    gap: 8px;
   }
 
   .dropdownFilters::-webkit-scrollbar {
@@ -421,75 +424,91 @@
   }
 
   .filterDropdown {
-    font-size: 13px;
-    padding: 6px 28px 6px 12px;
+    font-size: 12px;
+    padding: 6px 28px 6px 10px;
     white-space: nowrap;
     flex-shrink: 0;
   }
 
+  /* DATE HEADER */
+  .dateHeader {
+    padding: 8px 14px;
+    font-size: 11px;
+  }
+
+  .dateHeaderTotals {
+    gap: 8px;
+    font-size: 11px;
+  }
+
   /* TRANSACTION ROWS */
   .transactionRow {
-    padding: 14px 16px;
-    gap: 12px;
+    padding: 10px 14px;
+    gap: 8px;
+    overflow: hidden;
   }
 
   .rowLeft {
-    gap: 12px;
+    gap: 10px;
     flex: 1;
     min-width: 0;
+    overflow: hidden;
   }
 
   .txnIconWrap {
-    width: 38px;
-    height: 38px;
-    font-size: 16px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+    border-radius: 8px;
     flex-shrink: 0;
   }
 
+  .txnDetails {
+    min-width: 0;
+    overflow: hidden;
+  }
+
   .txnTitle {
-    font-size: 14px;
+    font-size: 13px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .txnSubtitle {
-    font-size: 12px;
+    font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .rowRight {
-    gap: 8px;
+    gap: 6px;
     flex-shrink: 0;
   }
 
-  /* Hide the badge on mobile to save space */
+  /* Hide the badge and account name on mobile to save space */
   .typeBadge {
     display: none;
   }
 
   .amountBlock {
     width: auto;
+    align-items: flex-end;
   }
 
   .txnAmount {
-    font-size: 14px;
+    font-size: 13px;
+    white-space: nowrap;
   }
 
   .txnAccount {
-    font-size: 11px;
+    font-size: 10px;
+    white-space: nowrap;
   }
 
   .deleteBtn {
-    padding: 6px;
-  }
-
-  .dateHeader {
-    padding: 10px 16px;
-    font-size: 12px;
+    padding: 4px;
   }
 }
 

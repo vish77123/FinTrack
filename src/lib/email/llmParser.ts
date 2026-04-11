@@ -16,6 +16,13 @@ export interface LLMParsedTransaction {
   date: string;
   accountLast4?: string;
   confidence: number;
+  categoryId?: string;
+  newCategory?: {
+    name: string;
+    icon: string;
+    color: string;
+    type: "income" | "expense";
+  };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -239,6 +246,11 @@ export async function parseBatchWithLLM(
 ${sanitize(email.text)}
 `).join("\n");
 
+const existingCategories = config?.existingCategories || [];
+  const categoriesContext = existingCategories.length > 0 
+    ? `\nExisting User Categories:\n${JSON.stringify(existingCategories, null, 2)}\n`
+    : `\nThe user has no existing categories.\n`;
+
   const batchPrompt = `
 You are an expert financial extraction engine.
 Parse ALL of the following ${emails.length} bank alert emails and return a JSON ARRAY of results.
@@ -250,9 +262,15 @@ For EACH email, extract:
 4. "type" — "expense" if debited/spent/paid, "income" if credited/received
 5. "accountLast4" — 4-digit account/card reference if present
 6. "date" — ISO 8601 date string if explicitly mentioned in text
+7. "categoryId" — Use the provided "Existing User Categories". If the merchant fits cleanly into one, return its ID. If NOT, leave it null.
+8. "newCategory" — If "categoryId" is null, propose a new vibrant category object with:
+    - name: e.g. 'Food Delivery', 'Shopping'
+    - icon: an appropriate emoji or simple text
+    - color: a hex color string (e.g. '#FF5733')
+    - type: matches the transaction type
 
 If an email is NOT a monetary transaction, still include it with emailId and all other fields null.
-
+${categoriesContext}
 ${emailsBlock}
 `;
 
@@ -276,6 +294,17 @@ ${emailsBlock}
               type: { type: "STRING", enum: ["income", "expense"] },
               accountLast4: { type: "STRING" },
               date: { type: "STRING" },
+              categoryId: { type: "STRING" },
+              newCategory: { 
+                type: "OBJECT", 
+                nullable: true,
+                properties: {
+                  name: { type: "STRING" },
+                  icon: { type: "STRING" },
+                  color: { type: "STRING" },
+                  type: { type: "STRING", enum: ["income", "expense"] }
+                }
+              }
             },
             required: ["emailId"],
           },
@@ -318,6 +347,8 @@ ${emailsBlock}
           date: item.date || new Date().toISOString().split("T")[0],
           accountLast4: item.accountLast4 || undefined,
           confidence: 0.80,
+          categoryId: item.categoryId || undefined,
+          newCategory: item.newCategory || undefined,
         });
       }
     }

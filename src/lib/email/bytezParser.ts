@@ -11,6 +11,13 @@ export interface LLMParsedTransaction {
   date: string;
   accountLast4?: string;
   confidence: number;
+  categoryId?: string;
+  newCategory?: {
+    name: string;
+    icon: string;
+    color: string;
+    type: "income" | "expense";
+  };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -56,6 +63,11 @@ export async function parseBatchWithBytez(
 ${sanitize(email.text)}
 `).join("\n");
 
+  const existingCategories = config?.existingCategories || [];
+  const categoriesContext = existingCategories.length > 0 
+    ? `\nExisting User Categories:\n${JSON.stringify(existingCategories, null, 2)}\n`
+    : `\nThe user has no existing categories.\n`;
+
   const prompt = `You are an expert financial extraction engine.
 Parse ALL of the following ${emails.length} bank alert emails and return a JSON ARRAY of results.
 
@@ -66,10 +78,13 @@ For EACH email, extract:
 4. "type" — "expense" if debited/spent/paid, "income" if credited/received
 5. "accountLast4" — 4-digit account/card reference if present
 6. "date" — ISO 8601 date string if explicitly mentioned in text
+7. "categoryId" — Use the provided "Existing User Categories". If the merchant fits cleanly into one, return its ID. If NOT, leave it null.
+8. "newCategory" — If "categoryId" is null, propose a new vibrant category object with: "name", "icon", "color", and "type" (matching the transaction type).
 
 Return ONLY the JSON array. Do not wrap it in markdown. Do not provide any explanation.
 If an email is NOT a monetary transaction, still include it with emailId and all other fields null.
 
+${categoriesContext}
 ${emailsBlock}
 `;
 
@@ -134,6 +149,8 @@ ${emailsBlock}
           date: item.date || new Date().toISOString().split("T")[0],
           accountLast4: item.accountLast4 || undefined,
           confidence: 0.80,
+          categoryId: item.categoryId || undefined,
+          newCategory: item.newCategory || undefined,
         });
       }
     }

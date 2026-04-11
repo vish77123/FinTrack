@@ -69,7 +69,7 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px 24px;
+  padding: 16px 20px;
 }
 
 .summaryLabel {
@@ -79,10 +79,10 @@
 }
 
 .summaryValue {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .textAccent { color: var(--accent); }
@@ -119,10 +119,10 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 20px 24px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   transition: box-shadow 0.2s ease;
 }
 
@@ -143,19 +143,19 @@
 }
 
 .catIcon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 16px;
   border: 1px solid;
   flex-shrink: 0;
 }
 
 .catName {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -229,7 +229,7 @@
 }
 
 .spentAmount {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -307,11 +307,11 @@
   }
 
   .summaryCard {
-    padding: 16px;
+    padding: 14px;
   }
 
   .summaryValue {
-    font-size: 20px;
+    font-size: 18px;
   }
 
   .budgetGrid {
@@ -320,22 +320,22 @@
   }
 
   .budgetCard {
-    padding: 16px;
-    gap: 10px;
+    padding: 14px;
+    gap: 8px;
   }
 
   .catIcon {
-    width: 36px;
-    height: 36px;
-    font-size: 16px;
-  }
-
-  .catName {
+    width: 30px;
+    height: 30px;
     font-size: 14px;
   }
 
+  .catName {
+    font-size: 13px;
+  }
+
   .spentAmount {
-    font-size: 16px;
+    font-size: 14px;
   }
 
   .deleteBtn {

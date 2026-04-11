@@ -89,6 +89,20 @@ export async function syncGmailAction() {
     .select("*, accounts(id, name)")
     .eq("user_id", user.id);
 
+  // Get categories and historical mappings for categorization
+  const { data: existingCategories } = await supabase
+    .from("categories")
+    .select("id, name, type")
+    .eq("user_id", user.id);
+
+  const { data: history } = await supabase
+    .from("transactions")
+    .select("note, category_id")
+    .eq("user_id", user.id)
+    .not("category_id", "is", null);
+
+  const historicalMappings = history || [];
+
   // Fetch bank alert emails from Gmail (last 3 days)
   const threeDaysAgo = Math.floor((Date.now() - 3 * 86400000) / 1000);
   const query = `(from:alerts OR from:noreply OR subject:transaction OR subject:debited OR subject:credited) after:${threeDaysAgo}`;
@@ -249,6 +263,7 @@ export async function syncGmailAction() {
       geminiModel: settings?.gemini_model_id,
       bytezKey: settings?.bytez_api_key,
       bytezModel: settings?.bytez_model_id,
+      existingCategories: existingCategories || [],
     };
 
     if (settings?.selected_llm_provider === "bytez") {
@@ -264,10 +279,15 @@ export async function syncGmailAction() {
     }
   }
 
+  // cache for categories created in this run
+  const newCategoriesCache = new Map<string, string>(); // name lower to id
+
   // ── PHASE 3: Save results ──────────────────────────
   for (const email of emailsToProcess) {
     let parsed = email.regexResult;
     let parsedBy = "regex";
+    let finalCategoryId: string | null = null;
+    let fallbackNewCategory: any = null; // Stash the new category object from LLM
 
     if (!parsed) {
       // Check LLM result by email ID
@@ -283,12 +303,61 @@ export async function syncGmailAction() {
           rawSnippet: email.fullText.slice(0, 200),
         };
         parsedBy = "llm";
+        finalCategoryId = llmResult.categoryId || null;
+        fallbackNewCategory = llmResult.newCategory || null;
       }
     }
 
     if (!parsed) {
       console.warn(`[SYNC] Could not parse email: ${email.subject.slice(0, 60)}`);
       continue;
+    }
+
+    // 1. FIRST PRIORITY: LOCAL HISTORICAL MATCH
+    // If we have a local matching merchant from history, IT OVERRIDES everything else!
+    let localMatchedCategory: string | null = null;
+    if (historicalMappings.length > 0) {
+      const merchantLower = parsed.merchant.toLowerCase();
+      let match = historicalMappings.find(h => h.note?.toLowerCase() === merchantLower);
+      if (!match) {
+        match = historicalMappings.find(h => 
+          h.note && (h.note.toLowerCase().includes(merchantLower) || merchantLower.includes(h.note.toLowerCase()))
+        );
+      }
+      if (match) {
+        localMatchedCategory = match.category_id;
+      }
+    }
+
+    // Assign final category based on priority
+    if (localMatchedCategory) {
+      finalCategoryId = localMatchedCategory;
+    } else if (finalCategoryId) {
+      // LLM successfully matched an existing category, leave it.
+    } else if (fallbackNewCategory) {
+      // Create new category if it hasn't been created during this execution yet
+      const catNameLower = fallbackNewCategory.name.toLowerCase();
+      if (newCategoriesCache.has(catNameLower)) {
+        finalCategoryId = newCategoriesCache.get(catNameLower)!;
+      } else {
+        console.log(`[SYNC] Creating new category from LLM fallback: ${fallbackNewCategory.name}`);
+        const { data: newCat } = await supabase
+          .from("categories")
+          .insert({
+            user_id: user.id,
+            name: fallbackNewCategory.name,
+            icon: fallbackNewCategory.icon || "🏷️",
+            color: fallbackNewCategory.color || "#888888",
+            type: fallbackNewCategory.type || parsed.type,
+          })
+          .select("id")
+          .single();
+        
+        if (newCat) {
+          finalCategoryId = newCat.id;
+          newCategoriesCache.set(catNameLower, newCat.id);
+        }
+      }
     }
 
     // Match to account via alert profiles
@@ -308,6 +377,7 @@ export async function syncGmailAction() {
         .insert({
           user_id: user.id,
           account_id: matchedAccountId,
+          category_id: finalCategoryId,
           type: parsed.type,
           amount: parsed.amount,
           date: parsed.date,
@@ -340,6 +410,7 @@ export async function syncGmailAction() {
         .insert({
           user_id: user.id,
           account_id: matchedAccountId,
+          category_id: finalCategoryId,
           type: parsed.type,
           amount: parsed.amount,
           date: parsed.date,

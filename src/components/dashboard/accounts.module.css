@@ -27,7 +27,7 @@
 .heroBanner {
   background: var(--accent);
   border-radius: var(--radius-lg);
-  padding: 32px;
+  padding: 24px;
   color: white;
   position: relative;
   overflow: hidden;
@@ -53,10 +53,10 @@
 }
 
 .heroAmount {
-  font-size: 48px;
+  font-size: 36px;
   font-weight: 700;
   letter-spacing: -1px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .heroSubtext {
@@ -70,15 +70,15 @@
 /* CARDS GRID */
 .cardsGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
 }
 
 .accountCard {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
   transition: all 0.2s ease;
@@ -93,18 +93,18 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .cardIcon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   background: var(--bg);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 17px;
 }
 
 .cardBadge {
@@ -119,10 +119,10 @@
 .badgeCash { color: var(--success); background: var(--success-light); }
 
 .cardAmount {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .cardAmount.negative {
@@ -130,10 +130,10 @@
 }
 
 .cardName {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-primary);
   font-weight: 500;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .cardDivider {
@@ -167,8 +167,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  min-height: 220px;
+  gap: 10px;
+  min-height: 160px;
   cursor: pointer;
   color: var(--text-secondary);
   transition: all 0.2s ease;
@@ -204,41 +204,75 @@
 /* ==================== MOBILE RESPONSIVE ==================== */
 @media (max-width: 768px) {
   .container {
-    gap: 20px;
+    gap: 16px;
   }
 
   .headerRow {
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
 
   .pageTitle {
-    font-size: 22px;
+    font-size: 20px;
+  }
+
+  .pageSubtitle {
+    font-size: 12px;
   }
 
   .heroBanner {
-    padding: 24px;
+    padding: 18px;
+  }
+
+  .heroLabel {
+    font-size: 12px;
+    margin-bottom: 8px;
   }
 
   .heroAmount {
-    font-size: 32px;
+    font-size: 26px;
+    margin-bottom: 6px;
+  }
+
+  .heroSubtext {
+    font-size: 11px;
   }
 
   .cardsGrid {
     grid-template-columns: 1fr;
-    gap: 16px;
+    gap: 10px;
   }
 
   .accountCard {
-    padding: 20px;
+    padding: 14px;
+  }
+
+  .cardHeader {
+    margin-bottom: 12px;
+  }
+
+  .cardIcon {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
   }
 
   .cardAmount {
-    font-size: 22px;
+    font-size: 18px;
+  }
+
+  .cardName {
+    font-size: 13px;
+    margin-bottom: 12px;
   }
 
   .addNewCard {
-    min-height: 140px;
+    min-height: 100px;
+    font-size: 13px;
+  }
+
+  .statItem {
+    font-size: 11px;
   }
 }
 

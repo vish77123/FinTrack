@@ -22,7 +22,8 @@ export default function TransactionList({ items, currency }: TransactionListProp
     const prefix = type === "expense" ? "-" : "+";
     const val = amount || 0;
     return `${prefix}${currency}${val.toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
     })}`;
   };
 
@@ -71,7 +72,13 @@ export default function TransactionList({ items, currency }: TransactionListProp
       <div className={styles.txnList}>
         {items.map((group) => (
           <div key={group.id}>
-            <div className={styles.dateGroup}>{group.dateLabel}</div>
+            <div className={styles.dateGroup} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{group.dateLabel}</span>
+              <div style={{ display: 'flex', gap: '12px', fontSize: '13px', fontWeight: 600 }}>
+                {group.dailyIncome > 0 && <span style={{ color: 'var(--success)' }}>{formatCurrency(group.dailyIncome, 'income')}</span>}
+                {group.dailyExpense > 0 && <span style={{ color: 'var(--danger)' }}>{formatCurrency(group.dailyExpense, 'expense')}</span>}
+              </div>
+            </div>
             
             {group.transactions.map((txn: any) => (
               <div key={txn.id} className={styles.txnItem} style={{ opacity: isPending ? 0.6 : 1 }}>

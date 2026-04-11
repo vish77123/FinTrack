@@ -146,15 +146,15 @@
 }
 
 .txnIcon {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: var(--card);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  margin-right: 16px;
+  font-size: 16px;
+  margin-right: 12px;
 }
 
 .txnDetails {
@@ -162,18 +162,18 @@
 }
 
 .txnMerchant {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .txnMeta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-tertiary);
   margin-top: 2px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .pendingSource {
@@ -302,7 +302,7 @@
 }
 
 .dateGroup {
-  padding: 12px 20px;
+  padding: 10px 18px;
   background: var(--card);
   font-size: 12px;
   font-weight: 600;
@@ -316,7 +316,7 @@
 .txnItem {
   display: flex;
   align-items: center;
-  padding: 16px 20px;
+  padding: 10px 18px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background 0.15s ease;
@@ -327,7 +327,7 @@
 
 .txnAmount {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
   text-align: right;
 }
 
@@ -405,7 +405,7 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 18px 20px;
+  padding: 14px 16px;
   box-shadow: var(--shadow-sm);
 }
 
@@ -413,17 +413,17 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .goalInfo { flex: 1; }
-.goalName { font-size: 14px; font-weight: 500; color: var(--text-primary); }
-.goalDate { font-size: 11px; color: var(--text-tertiary); }
+.goalName { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.goalDate { font-size: 10px; color: var(--text-tertiary); }
 .goalAmounts {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
-  margin-bottom: 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
   color: var(--text-secondary);
 }
 
@@ -434,15 +434,39 @@
 }
 
 @media (max-width: 768px) {
-  .pageHeader { flex-direction: column; gap: 16px; }
+  .pageHeader { flex-direction: column; gap: 12px; }
+  .pageHeader h1 { font-size: 22px; }
   .headerActions { width: 100%; }
   
-  .summaryGrid { gap: 10px; }
-  .summaryCard { padding: 14px; }
-  .summaryCard .amount { font-size: 20px; }
+  .summaryGrid { gap: 8px; }
+  .summaryCard { padding: 12px; }
+  .summaryCard .label { font-size: 11px; margin-bottom: 4px; }
+  .summaryCard .amount { font-size: 18px; margin-bottom: 8px; }
+  .summaryCard .trend { font-size: 11px; }
+  
+  .accountsScroll { gap: 12px; }
+  .accountCard { min-width: 160px; padding: 14px; }
+  .accountIcon { width: 32px; height: 32px; margin-bottom: 10px; }
+  .accountName { font-size: 11px; }
+  .accountBalance { font-size: 16px; }
+
+  .sectionHeader h2 { font-size: 16px; }
+
+  .txnIcon { width: 30px; height: 30px; font-size: 14px; margin-right: 10px; }
+  .txnMerchant { font-size: 12px; }
+  .txnMeta { font-size: 10px; gap: 4px; }
+  .txnItem { padding: 10px 14px; }
+  .txnAmount { font-size: 13px; }
+  .dateGroup { padding: 8px 14px; font-size: 11px; }
+
+  .goalCard { padding: 12px 14px; }
+  .goalName { font-size: 12px; }
+  .goalAmounts { font-size: 11px; }
   
   .pendingItem { flex-wrap: wrap; }
-  .pendingActions { width: 100%; padding-left: 56px; margin-top: 8px; }
+  .pendingActions { width: 100%; padding-left: 40px; margin-top: 8px; }
   
   .donutWrapper { flex-direction: column; }
+  .chartCard { padding: 14px; }
+  .chartCard h3 { font-size: 14px; margin-bottom: 14px; }
 }

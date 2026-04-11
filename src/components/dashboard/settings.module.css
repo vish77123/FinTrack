@@ -130,22 +130,25 @@
 
 /* ==================== AI CONFIG PANEL ==================== */
 .aiConfigPanel {
-  padding: 20px 24px;
+  padding: 16px 24px 20px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   animation: slideDown 0.2s ease;
 }
 
-.aiConfigField {
-  margin-bottom: 16px;
+.aiConfigBody {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.aiConfigField:last-child {
-  margin-bottom: 0;
-}
+.aiConfigField {}
 
 .aiConfigLabel {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
@@ -196,10 +199,82 @@
   line-height: 1.4;
 }
 
+/* Key input with show/hide toggle */
+.aiKeyInputWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.aiKeyInputWrap .aiConfigInput {
+  padding-right: 42px;
+}
+
+.aiKeyToggle {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.aiKeyToggle:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+/* Save actions row */
+.aiConfigActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.aiSaveBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+.aiSaveBtn:hover { opacity: 0.9; }
+.aiSaveBtn:active { transform: scale(0.97); }
+.aiSaveBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.aiSaveMsg {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--success);
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .aiProviderTabs {
   display: flex;
   gap: 8px;
-  margin-bottom: 16px;
 }
 
 .aiProviderTab {
@@ -229,12 +304,6 @@
   border-color: var(--accent);
   background: var(--accent-light);
   color: var(--accent);
-}
-
-.aiConfigDivider {
-  height: 1px;
-  background: var(--border);
-  margin: 16px 0;
 }
 
 /* ==================== CURRENCY / OPTION BUTTONS ==================== */
