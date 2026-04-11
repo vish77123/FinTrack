@@ -33,8 +33,11 @@ export default async function DashboardPage() {
     }
   }
 
-  const dashboardData = await getDashboardData();
-  const { transactions: pendingTxns } = await getPendingTransactionsAction();
+  const [dashboardData, pendingResult] = await Promise.all([
+    getDashboardData(),
+    getPendingTransactionsAction(),
+  ]);
+  const { transactions: pendingTxns } = pendingResult;
 
   return (
     <div>

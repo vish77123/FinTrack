@@ -18,38 +18,39 @@ export async function getDashboardData() {
   }
 
   try {
-    // 1. Fetch Accounts
-    const { data: accountsRaw } = await supabase
-      .from("accounts")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("is_archived", false)
-      .order("created_at", { ascending: true });
-
-    // 2. Fetch Transactions (with Joined Categories & Accounts)
-    const { data: transactionsRaw } = await supabase
-      .from("transactions")
-      .select(`
-        *,
-        categories(name, color, icon),
-        accounts!transactions_account_id_fkey(name)
-      `)
-      .eq("user_id", user.id)
-      .order("date", { ascending: false })
-      .limit(50); // Fetch a healthy chunk for recent views
-
-    // 3. Fetch Savings Goals
-    const { data: goalsRaw } = await supabase
-      .from("savings_goals")
-      .select("*")
-      .eq("user_id", user.id);
-
-    // 4. Fetch Categories for use in Transaction modal
-    const { data: categoriesRaw } = await supabase
-      .from("categories")
-      .select("id, name, icon, color, type, sort_order")
-      .eq("user_id", user.id)
-      .order("sort_order", { ascending: true });
+    // Run all queries in parallel for faster data loading
+    const [
+      { data: accountsRaw },
+      { data: transactionsRaw },
+      { data: goalsRaw },
+      { data: categoriesRaw }
+    ] = await Promise.all([
+      supabase
+        .from("accounts")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("is_archived", false)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("transactions")
+        .select(`
+          *,
+          categories(name, color, icon),
+          accounts!transactions_account_id_fkey(name)
+        `)
+        .eq("user_id", user.id)
+        .order("date", { ascending: false })
+        .limit(50),
+      supabase
+        .from("savings_goals")
+        .select("*")
+        .eq("user_id", user.id),
+      supabase
+        .from("categories")
+        .select("id, name, icon, color, type, sort_order")
+        .eq("user_id", user.id)
+        .order("sort_order", { ascending: true }),
+    ]);
 
     // 5. Fallback if user's account is absolutely brand new (no data at all)
     if (!accountsRaw || accountsRaw.length === 0) {

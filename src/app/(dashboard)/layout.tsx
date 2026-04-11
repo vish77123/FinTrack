@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import Sidebar from "@/components/sidebar/Sidebar";
+import NavigationProgress from "@/components/ui/NavigationProgress";
+import DashboardLoading from "./loading";
 import styles from "@/components/sidebar/sidebar.module.css";
 
 // Force Next.js to completely disable caching for the entire dashboard
@@ -50,8 +53,13 @@ export default async function DashboardLayout({
 
   return (
     <div className={styles.appLayout}>
+      <NavigationProgress />
       <Sidebar user={userProfile} />
-      <main className={styles.mainContent}>{children}</main>
+      <main className={styles.mainContent}>
+        <Suspense fallback={<DashboardLoading />}>
+          {children}
+        </Suspense>
+      </main>
     </div>
   );
 }
