@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Smartphone, Mail, Bot, Zap } from "lucide-react";
+import { AlertCircle, Smartphone, Mail, Bot, Zap, Pencil } from "lucide-react";
 import { approvePendingAction, discardPendingAction } from "@/app/actions/gmail";
+import { useUIStore } from "@/store/useUIStore";
 import styles from "./dashboard.module.css";
 
 interface PendingTransaction {
@@ -28,6 +29,7 @@ export default function PendingTray({ items, currency }: PendingTrayProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const { setEditingTransaction } = useUIStore();
 
   if (!items || items.length === 0) return null;
 
@@ -100,6 +102,23 @@ export default function PendingTray({ items, currency }: PendingTrayProps) {
                 disabled={processingId !== null}
               >
                 Discard
+              </button>
+              <button 
+                className={`${styles.actionBtn}`}
+                onClick={() => setEditingTransaction({
+                  id: item.id,
+                  type: item.type as "income" | "expense" | "transfer",
+                  amount: item.amount,
+                  account_id: (item as any).account_id || "",
+                  category_id: (item as any).category_id || null,
+                  date: item.date || new Date().toISOString(),
+                  note: item.note || "",
+                  source: "pending",
+                })}
+                disabled={processingId !== null}
+                style={{ color: "var(--accent)", borderColor: "var(--accent)" }}
+              >
+                <Pencil size={13} /> Edit
               </button>
               <button 
                 className={`${styles.actionBtn} ${styles.confirm}`}

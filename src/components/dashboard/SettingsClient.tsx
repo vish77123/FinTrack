@@ -391,7 +391,7 @@ export function SettingsClient() {
                 fd.append("regex_enabled", String(regexEnabled));
                 fd.append("llm_enabled", String(llmEnabled));
                 fd.append("sync_interval_minutes", String(syncInterval));
-                startTransition(() => updateEmailSyncSettingsAction(fd));
+                startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
               }}>
                 <div className={styles.itemLeft}>
                   <div className={`${styles.iconWrap} ${styles.orange}`}><Check size={18} /></div>
@@ -416,7 +416,7 @@ export function SettingsClient() {
                 fd.append("regex_enabled", String(newVal));
                 fd.append("llm_enabled", String(llmEnabled));
                 fd.append("sync_interval_minutes", String(syncInterval));
-                startTransition(() => updateEmailSyncSettingsAction(fd));
+                startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
               }}>
                 <div className={styles.itemLeft}>
                   <div className={`${styles.iconWrap} ${styles.purple}`}><Zap size={18} /></div>
@@ -441,7 +441,7 @@ export function SettingsClient() {
                 fd.append("regex_enabled", String(regexEnabled));
                 fd.append("llm_enabled", String(newVal));
                 fd.append("sync_interval_minutes", String(syncInterval));
-                startTransition(() => updateEmailSyncSettingsAction(fd));
+                startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
               }}>
                 <div className={styles.itemLeft}>
                   <div className={`${styles.iconWrap} ${styles.green}`}><Bot size={18} /></div>
@@ -470,7 +470,7 @@ export function SettingsClient() {
                         const fd = new FormData();
                         fd.append("update_ai_config", "true");
                         fd.append("selected_llm_provider", "gemini");
-                        startTransition(() => updateEmailSyncSettingsAction(fd));
+                        startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
                       }}
                     >
                       <Sparkles size={14} /> Google Gemini
@@ -482,7 +482,7 @@ export function SettingsClient() {
                         const fd = new FormData();
                         fd.append("update_ai_config", "true");
                         fd.append("selected_llm_provider", "bytez");
-                        startTransition(() => updateEmailSyncSettingsAction(fd));
+                        startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
                       }}
                     >
                       <Bot size={14} /> Bytez API
@@ -504,7 +504,7 @@ export function SettingsClient() {
                             const fd = new FormData();
                             fd.append("update_ai_config", "true");
                             fd.append("gemini_api_keys", e.target.value);
-                            startTransition(() => updateEmailSyncSettingsAction(fd));
+                            startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
                           }}
                         />
                         <p className={styles.aiConfigHint}>
@@ -520,7 +520,7 @@ export function SettingsClient() {
                             const fd = new FormData();
                             fd.append("update_ai_config", "true");
                             fd.append("gemini_model_id", e.target.value);
-                            startTransition(() => updateEmailSyncSettingsAction(fd));
+                            startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
                           }}
                         >
                           <option value="gemini-2.5-flash">Gemini 2.5 Flash — 20 RPD free tier</option>
@@ -541,7 +541,7 @@ export function SettingsClient() {
                             const fd = new FormData();
                             fd.append("update_ai_config", "true");
                             fd.append("bytez_api_key", e.target.value);
-                            startTransition(() => updateEmailSyncSettingsAction(fd));
+                            startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
                           }}
                         />
                       </div>
@@ -556,7 +556,7 @@ export function SettingsClient() {
                             const fd = new FormData();
                             fd.append("update_ai_config", "true");
                             fd.append("bytez_model_id", e.target.value);
-                            startTransition(() => updateEmailSyncSettingsAction(fd));
+                            startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
                           }}
                         />
                         <p className={styles.aiConfigHint}>
@@ -588,7 +588,7 @@ export function SettingsClient() {
                       fd.append("regex_enabled", String(regexEnabled));
                       fd.append("llm_enabled", String(llmEnabled));
                       fd.append("sync_interval_minutes", String(val));
-                      startTransition(() => updateEmailSyncSettingsAction(fd));
+                      startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
                     }}
                     style={{
                       padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--border)",

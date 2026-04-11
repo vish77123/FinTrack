@@ -11,9 +11,10 @@ interface BaseModalProps {
   title: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  maxWidth?: string;
 }
 
-export function BaseModal({ isOpen, onClose, title, children, footer }: BaseModalProps) {
+export function BaseModal({ isOpen, onClose, title, children, footer, maxWidth }: BaseModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape key press
@@ -50,6 +51,7 @@ export function BaseModal({ isOpen, onClose, title, children, footer }: BaseModa
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
+        style={maxWidth ? { maxWidth } : undefined}
       >
         <div className={styles.modalHeader}>
           <h2 id="modal-title">{title}</h2>

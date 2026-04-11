@@ -23,7 +23,7 @@ interface CategoryManagerModalProps {
 const presetColors = ["#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#5AC8FA", "#007AFF", "#5856D6", "#AF52DE", "#FF2D55", "#8E8E93"];
 
 export function CategoryManagerModal({ isOpen, onClose, categories }: CategoryManagerModalProps) {
-  const [activeTab, setActiveTab] = useState("expense");
+  const [activeTab, setActiveTab] = useState<"income" | "expense">("expense");
   const [isPending, startTransition] = useTransition();
 
   // Create state
@@ -116,15 +116,22 @@ export function CategoryManagerModal({ isOpen, onClose, categories }: CategoryMa
           </div>
         )}
 
-        <SegmentedControl 
-          options={tabs}
-          value={activeTab}
-          onChange={(val) => {
-            setActiveTab(val);
-            resetCreateForm();
-            setDeleteError("");
-          }}
-        />
+        <div style={{ display: "flex", borderRadius: "10px", overflow: "hidden", border: "1px solid var(--border)" }}>
+          <button
+            type="button"
+            onClick={() => { setActiveTab("expense"); resetCreateForm(); setDeleteError(""); }}
+            style={{ flex: 1, padding: "10px 16px", border: "none", background: activeTab === "expense" ? "var(--accent)" : "var(--surface)", color: activeTab === "expense" ? "#fff" : "var(--text-secondary)", fontWeight: 500, fontSize: "14px", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Expense
+          </button>
+          <button
+            type="button"
+            onClick={() => { setActiveTab("income"); resetCreateForm(); setDeleteError(""); }}
+            style={{ flex: 1, padding: "10px 16px", border: "none", background: activeTab === "income" ? "var(--accent)" : "var(--surface)", color: activeTab === "income" ? "#fff" : "var(--text-secondary)", fontWeight: 500, fontSize: "14px", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Income
+          </button>
+        </div>
 
         {isCreating ? (
           <div className={styles.inlineCreator}>

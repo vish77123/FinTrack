@@ -136,7 +136,7 @@ export async function syncGmailAction() {
 
   for (const msg of messages) {
     // Dedup: skip if already pending or approved
-    const { data: existing } = await supabase
+    const { data: existingPending } = await supabase
       .from("pending_transactions")
       .select("id")
       .eq("source_email_id", msg.id)
@@ -144,7 +144,20 @@ export async function syncGmailAction() {
       .in("status", ["pending", "approved"])
       .maybeSingle();
 
-    if (existing) {
+    if (existingPending) {
+      skippedCount++;
+      continue;
+    }
+
+    // Dedup: check main transactions table (in case it was already approved and moved, or auto-approved)
+    const { data: existingTxn } = await supabase
+      .from("transactions")
+      .select("id")
+      .eq("source_email_id", msg.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existingTxn) {
       skippedCount++;
       continue;
     }
@@ -299,6 +312,7 @@ export async function syncGmailAction() {
           amount: parsed.amount,
           date: parsed.date,
           note: parsed.merchant,
+          source_email_id: email.msgId,
         });
 
       if (!txnError) {
@@ -387,6 +401,7 @@ export async function approvePendingAction(pendingId: string) {
       amount: pending.amount,
       date: pending.date,
       note: pending.note,
+      source_email_id: pending.source_email_id,
     });
 
   if (txnError) return { error: "Failed to save transaction." };

@@ -1,17 +1,30 @@
 import { create } from "zustand";
 
+interface EditingTransaction {
+  id: string;
+  type: "income" | "expense" | "transfer";
+  amount: number;
+  account_id: string;
+  category_id?: string | null;
+  date: string;
+  note?: string;
+  source: "transaction" | "pending"; // which table it came from
+}
+
 interface UIState {
   theme: "light" | "dark";
   isTransactionModalOpen: boolean;
   isAddGoalModalOpen: boolean;
   isAddAccountModalOpen: boolean;
   isCategoryManagerModalOpen: boolean;
+  editingTransaction: EditingTransaction | null;
   setTheme: (theme: "light" | "dark") => void;
   toggleTheme: () => void;
   setTransactionModalOpen: (isOpen: boolean) => void;
   setAddGoalModalOpen: (isOpen: boolean) => void;
   setAddAccountModalOpen: (isOpen: boolean) => void;
   setCategoryManagerModalOpen: (isOpen: boolean) => void;
+  setEditingTransaction: (txn: EditingTransaction | null) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -20,6 +33,7 @@ export const useUIStore = create<UIState>((set) => ({
   isAddGoalModalOpen: false,
   isAddAccountModalOpen: false,
   isCategoryManagerModalOpen: false,
+  editingTransaction: null,
   setTheme: (theme) => {
     if (typeof window !== "undefined") localStorage.setItem("theme", theme);
     set({ theme });
@@ -30,8 +44,9 @@ export const useUIStore = create<UIState>((set) => ({
       if (typeof window !== "undefined") localStorage.setItem("theme", next);
       return { theme: next };
     }),
-  setTransactionModalOpen: (isOpen) => set({ isTransactionModalOpen: isOpen }),
+  setTransactionModalOpen: (isOpen) => set({ isTransactionModalOpen: isOpen, ...(!isOpen && { editingTransaction: null }) }),
   setAddGoalModalOpen: (isOpen) => set({ isAddGoalModalOpen: isOpen }),
   setAddAccountModalOpen: (isOpen) => set({ isAddAccountModalOpen: isOpen }),
   setCategoryManagerModalOpen: (isOpen) => set({ isCategoryManagerModalOpen: isOpen }),
+  setEditingTransaction: (txn) => set({ editingTransaction: txn, isTransactionModalOpen: !!txn }),
 }));

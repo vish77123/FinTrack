@@ -132,3 +132,102 @@ export async function addTransactionAction(formData: FormData) {
 
   return { success: true };
 }
+
+export async function editTransactionAction(transactionId: string, formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "You must be logged in." };
+
+  // Get the existing transaction to reverse the old balance effect
+  const { data: existing } = await supabase
+    .from("transactions")
+    .select("*")
+    .eq("id", transactionId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!existing) return { error: "Transaction not found." };
+
+  const newAmount = parseFloat(formData.get("amount") as string);
+  const newType = formData.get("type") as string;
+  const newAccountId = formData.get("account_id") as string;
+  const newCategoryId = formData.get("category_id") as string || null;
+  const newDate = new Date(formData.get("date") as string).toISOString();
+  const newNote = formData.get("note") as string || "";
+
+  if (!newAmount || newAmount <= 0) return { error: "Amount must be greater than zero." };
+
+  // Reverse old balance effect
+  if (existing.account_id) {
+    const { data: oldAcct } = await supabase.from("accounts").select("balance").eq("id", existing.account_id).single();
+    if (oldAcct) {
+      const reverseAmount = existing.type === "expense"
+        ? Number(oldAcct.balance) + Number(existing.amount)
+        : Number(oldAcct.balance) - Number(existing.amount);
+      await supabase.from("accounts").update({ balance: reverseAmount }).eq("id", existing.account_id);
+    }
+  }
+
+  // Update the transaction row
+  const { error: updateError } = await supabase
+    .from("transactions")
+    .update({
+      amount: newAmount,
+      type: newType,
+      account_id: newAccountId,
+      category_id: newCategoryId,
+      date: newDate,
+      note: newNote,
+    })
+    .eq("id", transactionId)
+    .eq("user_id", user.id);
+
+  if (updateError) return { error: "Failed to update transaction." };
+
+  // Apply new balance effect
+  const { data: newAcct } = await supabase.from("accounts").select("balance").eq("id", newAccountId).single();
+  if (newAcct) {
+    const newBalance = newType === "expense"
+      ? Number(newAcct.balance) - newAmount
+      : Number(newAcct.balance) + newAmount;
+    await supabase.from("accounts").update({ balance: newBalance }).eq("id", newAccountId);
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/transactions");
+  revalidatePath("/accounts");
+  return { success: true };
+}
+
+export async function updatePendingTransactionAction(pendingId: string, formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "You must be logged in." };
+
+  const newAmount = parseFloat(formData.get("amount") as string);
+  const newType = formData.get("type") as string;
+  const newAccountId = formData.get("account_id") as string || null;
+  const newCategoryId = formData.get("category_id") as string || null;
+  const newDate = new Date(formData.get("date") as string).toISOString();
+  const newNote = formData.get("note") as string || "";
+
+  if (!newAmount || newAmount <= 0) return { error: "Amount must be greater than zero." };
+
+  const { error: updateError } = await supabase
+    .from("pending_transactions")
+    .update({
+      amount: newAmount,
+      type: newType,
+      account_id: newAccountId,
+      category_id: newCategoryId,
+      date: newDate,
+      note: newNote,
+    })
+    .eq("id", pendingId)
+    .eq("user_id", user.id);
+
+  if (updateError) return { error: "Failed to update pending transaction." };
+
+  revalidatePath("/dashboard");
+  return { success: true };
+}

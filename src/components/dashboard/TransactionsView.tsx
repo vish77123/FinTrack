@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Plus, Search, Calendar, Trash2 } from "lucide-react";
+import { Download, Plus, Search, Calendar, Trash2, Pencil } from "lucide-react";
 import styles from "./transactions.module.css";
 import { useUIStore } from "@/store/useUIStore";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -16,7 +16,7 @@ interface TransactionsViewProps {
 }
 
 export default function TransactionsView({ transactions, currency, categories = [], accounts = [] }: TransactionsViewProps) {
-  const { setTransactionModalOpen } = useUIStore();
+  const { setTransactionModalOpen, setEditingTransaction } = useUIStore();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -349,6 +349,24 @@ export default function TransactionsView({ transactions, currency, categories = 
                           </div>
                           <div className={styles.txnAccount}>{txn.account}</div>
                         </div>
+                        <button
+                          onClick={() => setEditingTransaction({
+                            id: txn.id,
+                            type: txn.type,
+                            amount: txn.amount,
+                            account_id: txn.account_id || "",
+                            category_id: txn.category_id || null,
+                            date: txn.date || new Date().toISOString(),
+                            note: txn.note || txn.merchant || "",
+                            source: "transaction",
+                          })}
+                          disabled={isPending}
+                          className={styles.deleteBtn}
+                          title="Edit Transaction"
+                          style={{ color: "var(--accent)" }}
+                        >
+                          <Pencil size={16} />
+                        </button>
                         <button
                           onClick={() => handleDeleteClick(txn.id, txn.merchant)}
                           disabled={isPending}

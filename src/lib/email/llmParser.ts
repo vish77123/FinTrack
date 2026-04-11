@@ -335,8 +335,8 @@ ${emailsBlock}
  * Get current rate limit status
  */
 export function getRateLimitStatus() {
-  initKeys();
-  return apiKeys.map((k, i) => {
+  initGlobalKeys();
+  return globalApiKeys.map((k, i) => {
     resetCountersIfNeeded(k);
     return {
       keyIndex: i + 1,

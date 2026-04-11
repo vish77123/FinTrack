@@ -125,10 +125,13 @@ export async function getDashboardData() {
           id: txn.id,
           date: txn.date,
           merchant: txn.note || (txn.categories ? txn.categories.name : 'Transaction'),
+          note: txn.note || '',
           category: txn.categories ? txn.categories.name : 'General',
           amount: Number(txn.amount),
           type: txn.type,
           account: txn.accounts ? txn.accounts.name : 'Account',
+          account_id: txn.account_id,
+          category_id: txn.category_id,
           icon: txn.categories?.icon,
           color: txn.categories?.color
         });
@@ -215,7 +218,7 @@ export async function getReportsData() {
   const { data: txns } = await supabase
     .from("transactions")
     .select(`
-      id, amount, type, date, note,
+      id, amount, type, date, note, account_id, category_id,
       categories(name, color, icon),
       accounts!transactions_account_id_fkey(name)
     `)
@@ -226,10 +229,13 @@ export async function getReportsData() {
     id: txn.id,
     date: txn.date,
     merchant: txn.note || (txn.categories ? (txn.categories as any).name : "Transaction"),
+    note: txn.note || '',
     category: txn.categories ? (txn.categories as any).name : "General",
     amount: Number(txn.amount),
     type: txn.type,
     account: txn.accounts ? (txn.accounts as any).name : "Account",
+    account_id: txn.account_id,
+    category_id: txn.category_id,
     icon: (txn.categories as any)?.icon,
     color: (txn.categories as any)?.color,
   }));
