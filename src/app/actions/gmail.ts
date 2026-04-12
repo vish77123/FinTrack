@@ -105,12 +105,36 @@ export async function syncGmailAction() {
 
   // Fetch bank alert emails from Gmail (last 3 days)
   const threeDaysAgo = Math.floor((Date.now() - 3 * 86400000) / 1000);
-  const query = `(from:alerts OR from:noreply OR subject:transaction OR subject:debited OR subject:credited) after:${threeDaysAgo}`;
+
+  // Dynamically extend the query with from: terms for every user-configured
+  // profile sender so custom banks (e.g. AmericanExpress@welcome.ar) are fetched.
+  const baseTerms = [
+    "from:alerts",
+    "from:noreply",
+    "subject:transaction",
+    "subject:debited",
+    "subject:credited",
+  ];
+  if (profiles) {
+    for (const p of profiles) {
+      if (p.email_sender_filter) {
+        // Add both the exact address and the domain so Gmail's fuzzy from: matching works
+        const parts = p.email_sender_filter.split("@");
+        if (parts.length === 2) {
+          baseTerms.push(`from:${parts[1]}`);       // domain match (reliable)
+          baseTerms.push(`from:${p.email_sender_filter}`); // exact match
+        } else {
+          baseTerms.push(`from:${p.email_sender_filter}`);
+        }
+      }
+    }
+  }
+  const query = `(${[...new Set(baseTerms)].join(" OR ")}) after:${threeDaysAgo}`;
 
   let messages: any[] = [];
   try {
     const listRes = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=20`,
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`,
       { headers: { Authorization: `Bearer ${tokenRow.access_token}` } }
     );
 
@@ -197,9 +221,22 @@ export async function syncGmailAction() {
     const subject = headers.find((h: any) => h.name.toLowerCase() === "subject")?.value || "";
     const dateHeader = headers.find((h: any) => h.name.toLowerCase() === "date")?.value || "";
 
-    // Check if from a bank
-    if (!isBankSender(from)) {
-      console.log(`[SYNC] Skipping non-bank sender: ${from.slice(0, 50)}`);
+    // Build a set of profile-configured sender emails/domains for trusted bypass
+    const profileSenderSet = new Set(
+      (profiles || []).flatMap((p: any) => {
+        if (!p.email_sender_filter) return [];
+        const lower = p.email_sender_filter.toLowerCase();
+        const parts = lower.split("@");
+        return parts.length === 2 ? [lower, parts[1]] : [lower];
+      })
+    );
+    const isProfileSender = profileSenderSet.size > 0 &&
+      [...profileSenderSet].some(s => from.toLowerCase().includes(s));
+
+    // Allow known bank senders OR any sender configured in a user profile.
+    // This lets custom senders (AmericanExpress@welcome.ar, etc.) pass through.
+    if (!isBankSender(from) && !isProfileSender) {
+      console.log(`[SYNC] Skipping sender (not bank, not in profiles): ${from.slice(0, 60)}`);
       continue;
     }
 
@@ -322,7 +359,7 @@ export async function syncGmailAction() {
       const merchantLower = parsed.merchant.toLowerCase();
       let match = historicalMappings.find(h => h.note?.toLowerCase() === merchantLower);
       if (!match) {
-        match = historicalMappings.find(h => 
+        match = historicalMappings.find(h =>
           h.note && (h.note.toLowerCase().includes(merchantLower) || merchantLower.includes(h.note.toLowerCase()))
         );
       }
@@ -354,7 +391,7 @@ export async function syncGmailAction() {
           })
           .select("id")
           .single();
-        
+
         if (newCat) {
           finalCategoryId = newCat.id;
           newCategoriesCache.set(catNameLower, newCat.id);
@@ -362,13 +399,22 @@ export async function syncGmailAction() {
       }
     }
 
-    // Match to account via alert profiles
+    // Match to account via alert profiles.
+    // Priority: last4 match > sender match. If a subject_filter is set on the
+    // matched profile, it must also appear in the email subject (case-insensitive).
     let matchedAccountId: string | null = null;
     if (profiles) {
-      const match = profiles.find((p: any) =>
-        (parsed.last4 && p.account_last4 === parsed.last4) ||
-        (p.email_sender_filter && email.from.toLowerCase().includes(p.email_sender_filter.toLowerCase()))
-      );
+      const match = profiles.find((p: any) => {
+        const senderMatch =
+          (parsed.last4 && p.account_last4 === parsed.last4) ||
+          (p.email_sender_filter && email.from.toLowerCase().includes(p.email_sender_filter.toLowerCase()));
+        if (!senderMatch) return false;
+        // Enforce subject_filter only when it is non-empty
+        if (p.subject_filter && p.subject_filter.trim()) {
+          return email.subject.toLowerCase().includes(p.subject_filter.trim().toLowerCase());
+        }
+        return true;
+      });
       if (match) matchedAccountId = match.account_id;
     }
 
@@ -599,6 +645,7 @@ export async function saveAlertProfileAction(formData: FormData) {
   const accountId = formData.get("account_id") as string;
   const emailSender = formData.get("email_sender_filter") as string;
   const last4 = formData.get("account_last4") as string;
+  const subjectFilter = formData.get("subject_filter") as string;
 
   if (!accountId) return { error: "Account is required." };
 
@@ -609,6 +656,7 @@ export async function saveAlertProfileAction(formData: FormData) {
       account_id: accountId,
       email_sender_filter: emailSender || null,
       account_last4: last4 || null,
+      subject_filter: subjectFilter || null,
       auto_import: true,
       require_confirmation: true,
     }, { onConflict: "user_id,account_id" });

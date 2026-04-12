@@ -36,6 +36,7 @@ export function SettingsClient() {
   const { theme, setTheme, setCategoryManagerModalOpen } = useUIStore();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [mounted, setMounted] = useState(false);
 
   // Profile state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -68,6 +69,7 @@ export function SettingsClient() {
 
   // Load profile on mount
   useEffect(() => {
+    setMounted(true);
     getUserProfileAction().then((res) => {
       if (res.success) {
         setDisplayName(res.displayName || "");
@@ -275,15 +277,15 @@ export function SettingsClient() {
               <div className={styles.listItem} onClick={() => setShowThemePicker(!showThemePicker)}>
                 <div className={styles.itemLeft}>
                   <div className={`${styles.iconWrap} ${styles.purple}`}>
-                    {themeMode === "dark" ? <Moon size={18} /> : themeMode === "light" ? <Sun size={18} /> : <Monitor size={18} />}
+                    {!mounted ? <div style={{ width: 18, height: 18 }} /> : themeMode === "dark" ? <Moon size={18} /> : themeMode === "light" ? <Sun size={18} /> : <Monitor size={18} />}
                   </div>
                   <div className={styles.itemText}>
                     <div className={styles.itemTitle}>Appearance</div>
-                    <div className={styles.itemSubtitle}>{themeLabel} mode</div>
+                    <div className={styles.itemSubtitle}>{!mounted ? "Loading..." : `${themeLabel} mode`}</div>
                   </div>
                 </div>
                 <div className={styles.itemRight}>
-                  <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>{themeLabel}</span>
+                  <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>{!mounted ? "" : themeLabel}</span>
                 </div>
               </div>
               {showThemePicker && (

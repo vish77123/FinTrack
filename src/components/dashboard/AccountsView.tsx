@@ -36,6 +36,7 @@ interface AlertFormState {
   emailSender: string;
   customSender: string;
   last4: string;
+  subjectFilter: string;
 }
 
 export default function AccountsView({ accounts, netWorth, currency, alertProfiles = [] }: AccountsViewProps) {
@@ -113,6 +114,7 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
           emailSender: isCustom && existing.email_sender_filter ? "__custom__" : (existing.email_sender_filter || ""),
           customSender: isCustom ? (existing.email_sender_filter || "") : "",
           last4: existing.account_last4 || "",
+          subjectFilter: existing.subject_filter || "",
         }
       }));
     }
@@ -122,18 +124,19 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
   const updateForm = (accountId: string, field: keyof AlertFormState, value: string) => {
     setAlertForms(prev => ({
       ...prev,
-      [accountId]: { ...((prev[accountId]) || { emailSender: "", customSender: "", last4: "" }), [field]: value }
+      [accountId]: { ...((prev[accountId]) || { emailSender: "", customSender: "", last4: "", subjectFilter: "" }), [field]: value }
     }));
   };
 
   const handleSaveAlert = (accountId: string) => {
-    const form = alertForms[accountId] || { emailSender: "", customSender: "", last4: "" };
+    const form = alertForms[accountId] || { emailSender: "", customSender: "", last4: "", subjectFilter: "" };
     const effectiveSender = form.emailSender === "__custom__" ? form.customSender : form.emailSender;
 
     const fd = new FormData();
     fd.append("account_id", accountId);
     fd.append("email_sender_filter", effectiveSender);
     fd.append("account_last4", form.last4);
+    fd.append("subject_filter", form.subjectFilter || "");
 
     setAlertMsgs(prev => ({ ...prev, [accountId]: "Saving..." }));
     startTransition(async () => {
@@ -204,7 +207,7 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
         {bankAccounts.map((acc: any) => {
           const isNegative = acc.balance < 0;
           const profile = getProfile(acc.id);
-          const form = alertForms[acc.id] || { emailSender: "", customSender: "", last4: "" };
+          const form = alertForms[acc.id] || { emailSender: "", customSender: "", last4: "", subjectFilter: "" };
           const isAlertOpen = openAlertId === acc.id;
 
           return (
@@ -310,6 +313,32 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
                         onChange={e => updateForm(acc.id, "last4", e.target.value.replace(/\D/g, ""))}
                       />
                       <span className={styles.alertInputHint}>Used to match SMS/email to this account</span>
+                    </div>
+
+                    {/* Subject filter — optional */}
+                    <div className={styles.alertField}>
+                      <label className={styles.alertLabel} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        Subject Filter
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          padding: '2px 6px',
+                          borderRadius: '8px',
+                          background: 'rgba(99,102,241,0.12)',
+                          color: 'var(--accent, #6366f1)',
+                        }}>Optional</span>
+                      </label>
+                      <input
+                        type="text"
+                        className={styles.alertInput}
+                        placeholder="e.g. debited, Alert, transaction"
+                        value={form.subjectFilter}
+                        onChange={e => updateForm(acc.id, "subjectFilter", e.target.value)}
+                      />
+                      <span className={styles.alertInputHint}>
+                        Only sync emails whose subject contains this text.
+                        Leave blank to accept all emails from this sender.
+                      </span>
                     </div>
 
                     {/* Feedback */}
