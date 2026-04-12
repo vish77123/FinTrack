@@ -251,11 +251,15 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "You must be logged in." };
 
+  // sourceEmailId is carried from the original transaction(s) to the new split children
+  // so that the Gmail sync dedup can still find a row for the original email ID.
+  let sourceEmailId: string | null = null;
+
   if (isSplitGroup) {
     // ── GROUP EDIT: fetch all siblings, reverse all balances, delete all ──
     const { data: siblings } = await supabase
       .from("transactions")
-      .select("id, type, amount, account_id, transfer_to_account_id")
+      .select("id, type, amount, account_id, transfer_to_account_id, source_email_id")
       .eq("split_group_id", idOrGroupId)
       .eq("user_id", user.id);
 
@@ -282,6 +286,9 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
     const { error: delErr } = await supabase
       .from("transactions").delete().eq("split_group_id", idOrGroupId).eq("user_id", user.id);
     if (delErr) return { error: "Failed to remove original split group." };
+
+    // Carry the source_email_id forward so the sync dedup doesn't re-import this email
+    sourceEmailId = siblings.find(s => s.source_email_id)?.source_email_id ?? null;
 
   } else {
     // ── SINGLE EDIT: fetch one transaction, reverse its balance, delete it ──
@@ -321,6 +328,9 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
     const { error: deleteError } = await supabase
       .from("transactions").delete().eq("id", idOrGroupId).eq("user_id", user.id);
     if (deleteError) return { error: "Failed to remove the original transaction during conversion." };
+
+    // Carry the source_email_id forward so the sync dedup doesn't re-import this email
+    sourceEmailId = existing.source_email_id ?? null;
   }
 
 
@@ -337,7 +347,8 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
   const baseNote = (formData.get("note") as string) || null;
   const splitGroupId = crypto.randomUUID();
 
-  // 5. Insert each split
+  // Insert each split; stamp source_email_id only on the first row (the dedup anchor)
+  let isFirstSplit = true;
   for (const split of splits) {
     const payload = {
       amount: split.amount ? parseFloat(split.amount) : 0,
@@ -363,7 +374,10 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
       note: validated.data.note,
       transfer_to_account_id: validated.data.transfer_to_account_id,
       split_group_id: splitGroupId,
+      // First split child inherits source_email_id so sync won't re-import this email
+      ...(isFirstSplit && sourceEmailId ? { source_email_id: sourceEmailId } : {}),
     });
+    isFirstSplit = false;
 
     if (insertError) {
       console.error("convertToSplit – insert error:", insertError);
@@ -372,6 +386,106 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
 
     await applyBalanceUpdate(supabase, validated.data);
   }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/transactions");
+  revalidatePath("/accounts");
+  return { success: true };
+}
+
+/**
+ * Collapses a split group back into a single normal transaction.
+ * Called when the user edits a split parent and turns OFF split mode.
+ *
+ * Flow:
+ * 1. Fetch all siblings by split_group_id
+ * 2. Reverse every sibling's balance effect
+ * 3. Delete all siblings
+ * 4. Insert one fresh transaction using the formData values
+ * 5. Apply balance update for the new single transaction
+ */
+export async function collapseSplitToSingleAction(splitGroupId: string, formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "You must be logged in." };
+
+  // 1. Fetch all siblings
+  const { data: siblings } = await supabase
+    .from("transactions")
+    .select("id, type, amount, account_id, transfer_to_account_id, source_email_id")
+    .eq("split_group_id", splitGroupId)
+    .eq("user_id", user.id);
+
+  if (!siblings || siblings.length === 0) return { error: "Split group not found." };
+
+  // 2. Reverse each sibling's balance
+  for (const sib of siblings) {
+    const amt = Number(sib.amount);
+    if (sib.type === "expense") {
+      const { data: a } = await supabase.from("accounts").select("balance").eq("id", sib.account_id).single();
+      if (a) await supabase.from("accounts").update({ balance: Number(a.balance) + amt }).eq("id", sib.account_id);
+    } else if (sib.type === "income") {
+      const { data: a } = await supabase.from("accounts").select("balance").eq("id", sib.account_id).single();
+      if (a) await supabase.from("accounts").update({ balance: Number(a.balance) - amt }).eq("id", sib.account_id);
+    } else if (sib.type === "transfer") {
+      const { data: from } = await supabase.from("accounts").select("balance").eq("id", sib.account_id).single();
+      if (from) await supabase.from("accounts").update({ balance: Number(from.balance) + amt }).eq("id", sib.account_id);
+      if (sib.transfer_to_account_id) {
+        const { data: to } = await supabase.from("accounts").select("balance").eq("id", sib.transfer_to_account_id).single();
+        if (to) await supabase.from("accounts").update({ balance: Number(to.balance) - amt }).eq("id", sib.transfer_to_account_id);
+      }
+    }
+  }
+
+  // 3. Delete all siblings
+  const { error: deleteError } = await supabase
+    .from("transactions")
+    .delete()
+    .eq("split_group_id", splitGroupId)
+    .eq("user_id", user.id);
+
+  if (deleteError) {
+    console.error("collapseSplitToSingle – delete error:", deleteError);
+    return { error: "Failed to remove the split transactions." };
+  }
+
+  // Carry the source_email_id from the first sibling that has one (dedup anchor)
+  const sourceEmailId = siblings.find(s => s.source_email_id)?.source_email_id ?? null;
+
+  // 4. Build and validate the new single transaction payload
+  const payload = {
+    amount: parseFloat(formData.get("amount") as string),
+    type: formData.get("type") as string,
+    account_id: formData.get("account_id") as string,
+    category_id: (formData.get("category_id") as string) || null,
+    date: new Date(formData.get("date") as string).toISOString(),
+    note: (formData.get("note") as string) || null,
+    transfer_to_account_id: (formData.get("transfer_to_account_id") as string) || null,
+  };
+
+  const validated = transactionSchema.safeParse(payload);
+  if (!validated.success) return { error: validated.error.issues[0].message };
+
+  // 5. Insert the single transaction
+  const { error: insertError } = await supabase.from("transactions").insert({
+    user_id: user.id,
+    amount: validated.data.amount,
+    type: validated.data.type,
+    account_id: validated.data.account_id,
+    category_id: validated.data.category_id,
+    date: validated.data.date,
+    note: validated.data.note,
+    transfer_to_account_id: validated.data.transfer_to_account_id,
+    // no split_group_id — this is now a normal transaction
+    ...(sourceEmailId ? { source_email_id: sourceEmailId } : {}),
+  });
+
+  if (insertError) {
+    console.error("collapseSplitToSingle – insert error:", insertError);
+    return { error: "Failed to save the merged transaction." };
+  }
+
+  await applyBalanceUpdate(supabase, validated.data);
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");

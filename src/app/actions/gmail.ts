@@ -163,15 +163,17 @@ export async function syncGmailAction() {
       continue;
     }
 
-    // Dedup: check main transactions table (in case it was already approved and moved, or auto-approved)
-    const { data: existingTxn } = await supabase
+    // Dedup: check main transactions table.
+    // Also covers split children — when a synced txn is converted to a split,
+    // the first split child inherits source_email_id, so this check still fires.
+    const { data: existingTxns } = await supabase
       .from("transactions")
       .select("id")
       .eq("source_email_id", msg.id)
       .eq("user_id", user.id)
-      .maybeSingle();
+      .limit(1);
 
-    if (existingTxn) {
+    if (existingTxns && existingTxns.length > 0) {
       skippedCount++;
       continue;
     }

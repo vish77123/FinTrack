@@ -6,7 +6,7 @@ import { BaseModal } from "./BaseModal";
 import { CurrencyInput } from "./CurrencyInput";
 import { SegmentedControl } from "./SegmentedControl";
 import { CategoryPicker } from "./CategoryPicker";
-import { addTransactionAction, editTransactionAction, updatePendingTransactionAction, convertToSplitAction } from "@/app/actions/transactions";
+import { addTransactionAction, editTransactionAction, updatePendingTransactionAction, convertToSplitAction, collapseSplitToSingleAction } from "@/app/actions/transactions";
 import { useUIStore } from "@/store/useUIStore";
 import styles from "./ui.module.css";
 
@@ -245,9 +245,12 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
       if (editingTransaction.source === "pending") {
         // Pending transactions can't be converted to splits
         result = await updatePendingTransactionAction(editingTransaction.id, formData);
-      } else if (editingTransaction.splitGroupId) {
-        // Editing entire split parent group — uses splitGroupId to delete all siblings and recreate
+      } else if (editingTransaction.splitGroupId && isSplitMode) {
+        // Editing entire split parent group with split mode active — delete all siblings and recreate
         result = await convertToSplitAction(editingTransaction.splitGroupId, formData, true);
+      } else if (editingTransaction.splitGroupId && !isSplitMode) {
+        // User turned OFF split mode on a split parent — collapse all siblings into one transaction
+        result = await collapseSplitToSingleAction(editingTransaction.splitGroupId, formData);
       } else if (isSplitMode) {
         // Convert existing single transaction into multiple splits
         result = await convertToSplitAction(editingTransaction.id, formData);
@@ -308,13 +311,34 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
         disabled={isSubmitting}
         style={{ opacity: isSubmitting ? 0.7 : 1 }}
       >
-      {isSubmitting ? "Saving..." : isEditing && isSplitMode ? "Convert to Split" : isEditing ? "Update Transaction" : "Save Transaction"}
+      {isSubmitting
+        ? "Saving..."
+        : isEditing && isSplitMode
+        ? "Convert to Split"
+        : isEditing && editingTransaction?.splitGroupId && !isSplitMode
+        ? "Save as Single"
+        : isEditing
+        ? "Update Transaction"
+        : "Save Transaction"}
       </button>
     </>
   );
 
   return (
-    <BaseModal isOpen={isOpen} onClose={handleClose} title={isEditing && isSplitMode ? "Convert to Split" : isEditing ? "Edit Transaction" : "Add Transaction"} footer={footer}>
+    <BaseModal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title={
+        isEditing && isSplitMode
+          ? "Convert to Split"
+          : isEditing && editingTransaction?.splitGroupId && !isSplitMode
+          ? "Edit Split Transaction"
+          : isEditing
+          ? "Edit Transaction"
+          : "Add Transaction"
+      }
+      footer={footer}
+    >
       {errorMsg && (
         <div style={{ background: "var(--danger-light)", color: "var(--danger)", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "14px" }}>
           {errorMsg}
