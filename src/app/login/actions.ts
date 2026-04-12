@@ -28,7 +28,7 @@ export async function signUpWithEmail(formData: FormData) {
   const password = formData.get("password") as string;
   const fullName = formData.get("fullName") as string;
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
@@ -40,6 +40,18 @@ export async function signUpWithEmail(formData: FormData) {
 
   if (error) {
     return { error: error.message };
+  }
+
+  // Pre-seed default categories for the newly signed up user
+  if (data?.user) {
+    const defaultCategories = [
+      { user_id: data.user.id, name: 'Income', icon: '💰', color: '#34C759', type: 'income', sort_order: 1 },
+      { user_id: data.user.id, name: 'Food', icon: '🍔', color: '#FF9500', type: 'expense', sort_order: 2 },
+      { user_id: data.user.id, name: 'Transport', icon: '🚗', color: '#636366', type: 'expense', sort_order: 3 },
+      { user_id: data.user.id, name: 'Housing', icon: '🏠', color: '#6C63FF', type: 'expense', sort_order: 4 },
+      { user_id: data.user.id, name: 'Entertainment', icon: '🎬', color: '#FF3B30', type: 'expense', sort_order: 5 },
+    ];
+    await supabase.from("categories").insert(defaultCategories);
   }
 
   redirect("/dashboard");

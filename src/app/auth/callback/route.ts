@@ -52,6 +52,25 @@ export async function GET(request: Request) {
         }
       }
 
+      // Check and seed default categories if the user has none (e.g. first time Google login)
+      if (user) {
+        const { count } = await supabase
+          .from("categories")
+          .select("*", { count: 'exact', head: true })
+          .eq("user_id", user.id);
+
+        if (count === 0) {
+          const defaultCategories = [
+            { user_id: user.id, name: 'Income', icon: '💰', color: '#34C759', type: 'income', sort_order: 1 },
+            { user_id: user.id, name: 'Food', icon: '🍔', color: '#FF9500', type: 'expense', sort_order: 2 },
+            { user_id: user.id, name: 'Transport', icon: '🚗', color: '#636366', type: 'expense', sort_order: 3 },
+            { user_id: user.id, name: 'Housing', icon: '🏠', color: '#6C63FF', type: 'expense', sort_order: 4 },
+            { user_id: user.id, name: 'Entertainment', icon: '🎬', color: '#FF3B30', type: 'expense', sort_order: 5 },
+          ];
+          await supabase.from("categories").insert(defaultCategories);
+        }
+      }
+
       return NextResponse.redirect(`${origin}${next}`);
     }
   }
