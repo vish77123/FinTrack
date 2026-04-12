@@ -9,6 +9,9 @@ interface EditingTransaction {
   date: string;
   note?: string;
   source: "transaction" | "pending"; // which table it came from
+  isSplitChild?: boolean;            // child of a split group → hide split toggle
+  splitGroupId?: string;             // set when editing the whole split parent
+  splitChildren?: any[];             // pre-filled split rows when editing parent
 }
 
 interface UIState {

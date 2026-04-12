@@ -117,6 +117,7 @@
 .badgeBank { color: var(--accent); background: var(--accent-light); }
 .badgeCredit { color: var(--danger); background: var(--danger-light); }
 .badgeCash { color: var(--success); background: var(--success-light); }
+.badgeContact { color: var(--warning, #eab308); background: var(--warning-light, rgba(234, 179, 8, 0.15)); }
 
 .cardAmount {
   font-size: 22px;

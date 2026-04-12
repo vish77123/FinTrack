@@ -36,7 +36,8 @@ export async function getDashboardData() {
         .select(`
           *,
           categories(name, color, icon),
-          accounts!transactions_account_id_fkey(name)
+          accounts!transactions_account_id_fkey(name, type),
+          transfer_account:accounts!transactions_transfer_to_account_id_fkey(name, type)
         `)
         .eq("user_id", user.id)
         .order("date", { ascending: false })
@@ -134,8 +135,12 @@ export async function getDashboardData() {
           account: txn.accounts ? txn.accounts.name : 'Account',
           account_id: txn.account_id,
           category_id: txn.category_id,
+          transfer_to_account_id: txn.transfer_to_account_id,
+          transfer_account_name: txn.transfer_account ? (txn.transfer_account as any).name : null,
+          transfer_account_type: txn.transfer_account ? (txn.transfer_account as any).type : null,
           icon: txn.categories?.icon,
-          color: txn.categories?.color
+          color: txn.categories?.color,
+          split_group_id: txn.split_group_id
         });
       });
 
@@ -220,9 +225,10 @@ export async function getReportsData() {
   const { data: txns } = await supabase
     .from("transactions")
     .select(`
-      id, amount, type, date, note, account_id, category_id,
+      id, amount, type, date, note, account_id, category_id, transfer_to_account_id, split_group_id,
       categories(name, color, icon),
-      accounts!transactions_account_id_fkey(name)
+      accounts!transactions_account_id_fkey(name, type),
+      transfer_account:accounts!transactions_transfer_to_account_id_fkey(name, type)
     `)
     .eq("user_id", user.id)
     .order("date", { ascending: false });
@@ -238,8 +244,12 @@ export async function getReportsData() {
     account: txn.accounts ? (txn.accounts as any).name : "Account",
     account_id: txn.account_id,
     category_id: txn.category_id,
+    transfer_to_account_id: txn.transfer_to_account_id,
+    transfer_account_name: txn.transfer_account ? (txn.transfer_account as any).name : null,
+    transfer_account_type: txn.transfer_account ? (txn.transfer_account as any).type : null,
     icon: (txn.categories as any)?.icon,
     color: (txn.categories as any)?.color,
+    split_group_id: txn.split_group_id
   }));
 
   return { transactions, currency: "₹" };

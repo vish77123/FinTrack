@@ -114,3 +114,60 @@ export async function deleteTransactionAction(transactionId: string) {
   
   return { success: true };
 }
+
+/**
+ * Deletes ALL transactions sharing a split_group_id and reverses their balances.
+ * Used when the user deletes a split parent row from the UI.
+ */
+export async function deleteAllSplitSiblingsAction(splitGroupId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Unauthorized" };
+
+  // Fetch all siblings
+  const { data: siblings, error: fetchError } = await supabase
+    .from("transactions")
+    .select("id, type, amount, account_id, transfer_to_account_id")
+    .eq("split_group_id", splitGroupId)
+    .eq("user_id", user.id);
+
+  if (fetchError || !siblings || siblings.length === 0) {
+    return { error: "No split transactions found." };
+  }
+
+  // Reverse balance effects for every sibling
+  for (const txn of siblings) {
+    const amount = Number(txn.amount);
+    if (txn.type === "expense") {
+      const { data: acct } = await supabase.from("accounts").select("balance").eq("id", txn.account_id).single();
+      if (acct) await supabase.from("accounts").update({ balance: Number(acct.balance) + amount }).eq("id", txn.account_id);
+    } else if (txn.type === "income") {
+      const { data: acct } = await supabase.from("accounts").select("balance").eq("id", txn.account_id).single();
+      if (acct) await supabase.from("accounts").update({ balance: Number(acct.balance) - amount }).eq("id", txn.account_id);
+    } else if (txn.type === "transfer") {
+      const { data: from } = await supabase.from("accounts").select("balance").eq("id", txn.account_id).single();
+      if (from) await supabase.from("accounts").update({ balance: Number(from.balance) + amount }).eq("id", txn.account_id);
+      if (txn.transfer_to_account_id) {
+        const { data: to } = await supabase.from("accounts").select("balance").eq("id", txn.transfer_to_account_id).single();
+        if (to) await supabase.from("accounts").update({ balance: Number(to.balance) - amount }).eq("id", txn.transfer_to_account_id);
+      }
+    }
+  }
+
+  // Delete all sibling rows
+  const { error: deleteError } = await supabase
+    .from("transactions")
+    .delete()
+    .eq("split_group_id", splitGroupId)
+    .eq("user_id", user.id);
+
+  if (deleteError) {
+    console.error("deleteAllSplitSiblings error:", deleteError);
+    return { error: "Failed to delete split transactions." };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/transactions");
+  revalidatePath("/accounts");
+  return { success: true };
+}

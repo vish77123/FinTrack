@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 
 const accountSchema = z.object({
   name: z.string().min(1, "Account name is required").max(50),
-  type: z.enum(["bank", "cash", "credit_card", "investment", "savings"]),
+  type: z.enum(["bank", "cash", "credit_card", "investment", "savings", "contact"]),
   balance: z.number().default(0),
 });
 

@@ -323,7 +323,14 @@
 }
 
 .txnItem:last-child { border-bottom: none; }
-.txnItem:hover { background: var(--card); }
+.txnItem:hover {
+  background: var(--bg-secondary);
+}
+
+.splitItem {
+  border: 1px dashed var(--border);
+  background: var(--bg);
+}
 
 .txnAmount {
   font-weight: 600;

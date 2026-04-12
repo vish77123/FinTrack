@@ -21,9 +21,12 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
+  const iconForType = type === 'contact' ? 'User' : 'Landmark';
+  const colorForType = type === 'contact' ? 'var(--warning)' : 'var(--accent)';
+
   const handleSubmit = async () => {
     setErrorMsg("");
-    if (!name) return setErrorMsg("Please enter an account name.");
+    if (!name) return setErrorMsg(type === 'contact' ? "Please enter a contact name." : "Please enter an account name.");
 
     setIsSubmitting(true);
 
@@ -81,7 +84,7 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
       )}
 
       <div className={styles.formGroup}>
-        <label className={styles.inputLabel}>Initial Balance</label>
+        <label className={styles.inputLabel}>{type === 'contact' ? 'Initial Debt (leave 0 if none)' : 'Initial Balance'}</label>
         <CurrencyInput 
           value={balance} 
           onChange={setBalance} 
@@ -90,10 +93,10 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
       </div>
 
       <div className={styles.formGroup}>
-        <label className={styles.inputLabel}>Account Name</label>
+        <label className={styles.inputLabel}>{type === 'contact' ? 'Contact Name' : 'Account Name'}</label>
         <input 
           type="text" 
-          placeholder="e.g. Chase Checking"
+          placeholder={type === 'contact' ? 'e.g. John (Roommate)' : 'e.g. Chase Checking'}
           className={styles.formInput}
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -112,6 +115,7 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
           <option value="cash">Cash Wallet</option>
           <option value="investment">Investment</option>
           <option value="savings">Savings</option>
+          <option value="contact">Contact / Roommate</option>
         </select>
       </div>
     </BaseModal>

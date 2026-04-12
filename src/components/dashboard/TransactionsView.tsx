@@ -2,11 +2,11 @@
 
 import { useState, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Plus, Search, Calendar, Trash2, Pencil } from "lucide-react";
+import { Download, Plus, Search, Calendar, Trash2, Pencil, ChevronDown, ChevronUp } from "lucide-react";
 import styles from "./transactions.module.css";
 import { useUIStore } from "@/store/useUIStore";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { deleteTransactionAction } from "@/app/actions/deleteTransaction";
+import { deleteTransactionAction, deleteAllSplitSiblingsAction } from "@/app/actions/deleteTransaction";
 
 interface TransactionsViewProps {
   transactions: any[];
@@ -31,9 +31,25 @@ export default function TransactionsView({ transactions, currency, categories = 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingName, setDeletingName] = useState("");
+  const [deletingIsSplitGroup, setDeletingIsSplitGroup] = useState(false);
+
+  // Split expand state
+  const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set());
+
+  const toggleSplitExpand = (groupId: string) => {
+    setExpandedSplits(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
 
   const formatCurrency = (amount: number, type: string) => {
-    const prefix = type === "expense" ? "− " : "+ ";
+    const prefix = type === "expense" ? "− " : type === "transfer" ? "" : "+ ";
     return `${prefix}${currency}${amount.toLocaleString("en-IN", {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
@@ -143,7 +159,42 @@ export default function TransactionsView({ transactions, currency, categories = 
 
         if (filteredTxns.length === 0) return null;
 
-        return { ...group, transactions: filteredTxns };
+        // BUNDLE SPLITS
+        const finalTxns: any[] = [];
+        const splitGroups = new Map<string, any[]>();
+
+        filteredTxns.forEach((txn: any) => {
+          if (txn.split_group_id) {
+            if (!splitGroups.has(txn.split_group_id)) {
+              splitGroups.set(txn.split_group_id, []);
+            }
+            splitGroups.get(txn.split_group_id)?.push(txn);
+          } else {
+            finalTxns.push(txn);
+          }
+        });
+
+        // Add split groups back as single objects with a children property
+        splitGroups.forEach((children, groupId) => {
+          const totalAmount = children.reduce((sum: number, c: any) => sum + Number(c.amount), 0);
+          // Use the expense child as representative, or first child
+          const rep = children.find((c: any) => c.type === 'expense') || children[0];
+          finalTxns.push({
+            ...rep,
+            id: `split_${groupId}`,
+            splitGroupId: groupId,
+            merchant: rep.note || rep.merchant || 'Split Transaction',
+            amount: totalAmount,
+            isSplitGroup: true,
+            splitCount: children.length,
+            children: children
+          });
+        });
+
+        // Sort by time/id again since splits might be out of sync
+        finalTxns.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        return { ...group, transactions: finalTxns };
       })
       .filter(Boolean);
   }, [transactions, typeFilter, searchQuery, categoryFilter, accountFilter, dateFilter, customDateRange]);
@@ -155,14 +206,27 @@ export default function TransactionsView({ transactions, currency, categories = 
 
     filteredTransactions.forEach((group: any) => {
       group.transactions.forEach((txn: any) => {
-        rows.push([
-          group.dateLabel,
-          txn.type,
-          txn.category || "",
-          txn.merchant || "",
-          txn.amount?.toString() || "0",
-          txn.account || "",
-        ]);
+        if (txn.isSplitGroup && txn.children) {
+          txn.children.forEach((child: any) => {
+            rows.push([
+              group.dateLabel,
+              child.type,
+              child.category || "",
+              child.merchant || child.note || "",
+              child.amount?.toString() || "0",
+              child.account || "",
+            ]);
+          });
+        } else {
+          rows.push([
+            group.dateLabel,
+            txn.type,
+            txn.category || "",
+            txn.merchant || "",
+            txn.amount?.toString() || "0",
+            txn.account || "",
+          ]);
+        }
       });
     });
 
@@ -183,18 +247,23 @@ export default function TransactionsView({ transactions, currency, categories = 
   };
 
   // Delete handlers
-  const handleDeleteClick = (id: string, merchant: string) => {
+  const handleDeleteClick = (id: string, merchant: string, isSplitGroup = false) => {
     setDeletingId(id);
     setDeletingName(merchant);
+    setDeletingIsSplitGroup(isSplitGroup);
   };
 
   const handleConfirmDelete = () => {
     if (!deletingId) return;
     const id = deletingId;
+    const isSplit = deletingIsSplitGroup;
     startTransition(async () => {
-      const res = await deleteTransactionAction(id);
+      const res = isSplit
+        ? await deleteAllSplitSiblingsAction(id)
+        : await deleteTransactionAction(id);
       setDeletingId(null);
       setDeletingName("");
+      setDeletingIsSplitGroup(false);
       if (res.error) {
         alert(res.error);
       } else {
@@ -320,65 +389,215 @@ export default function TransactionsView({ transactions, currency, categories = 
               <div className={styles.groupItems}>
                 {group.transactions.map((txn: any) => {
                   const isExpense = txn.type === "expense";
+                  const isTransfer = txn.type === "transfer";
+                  const isSplitGroup = txn.isSplitGroup;
+                  const isExpanded = isSplitGroup && expandedSplits.has(txn.splitGroupId);
 
                   return (
-                    <div key={txn.id} className={styles.transactionRow} style={{ opacity: isPending ? 0.6 : 1 }}>
-
+                    <div key={txn.id} style={{ display: 'contents' }}>
+                    {/* Main Transaction Row */}
+                    <div
+                      className={`${styles.transactionRow} ${isSplitGroup ? styles.splitRow : ''}`}
+                      style={{ opacity: isPending ? 0.6 : 1, cursor: isSplitGroup ? 'pointer' : 'default' }}
+                      onClick={isSplitGroup ? () => toggleSplitExpand(txn.splitGroupId) : undefined}
+                    >
                       {/* Left: Icon, Title, Subtitle */}
                       <div className={styles.rowLeft}>
                         <div
                           className={styles.txnIconWrap}
                           style={txn.color ? { backgroundColor: `${txn.color}15`, color: txn.color, borderColor: `${txn.color}30` } : undefined}
                         >
-                          {txn.icon || getIcon(txn.category)}
+                          {isSplitGroup ? "✂️" : isTransfer ? "↔️" : txn.icon || getIcon(txn.category)}
                         </div>
                         <div className={styles.txnDetails}>
-                          <div className={styles.txnTitle}>{txn.merchant}</div>
+                          <div className={styles.txnTitle}>
+                            {txn.merchant}
+                            {isSplitGroup && (
+                              <span className={styles.splitBadge}>
+                                Split • {txn.splitCount} items
+                              </span>
+                            )}
+                          </div>
                           <div className={styles.txnSubtitle}>
-                            <span>{txn.category || txn.note || "Uncategorized"}</span>
+                            {isSplitGroup ? (
+                              <span>
+                                {txn.children.map((c: any, i: number) => (
+                                  <span key={c.id}>
+                                    {c.type === 'transfer'
+                                      ? `→ ${c.transfer_account_name || c.account}`
+                                      : c.category}
+                                    {i < txn.children.length - 1 ? ', ' : ''}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : isTransfer ? (
+                              <span>
+                                {txn.account} → {txn.transfer_account_name || 'Account'}
+                              </span>
+                            ) : (
+                              <span>{txn.category || txn.note || "Uncategorized"}</span>
+                            )}
                           </div>
                         </div>
                       </div>
 
-                      {/* Right: Badge, Amount, Account, Delete */}
+                      {/* Right: Badge, Amount, Account, Actions */}
                       <div className={styles.rowRight}>
-                        <div className={`${styles.typeBadge} ${isExpense ? styles.badgeExpense : styles.badgeIncome}`}>
-                          {isExpense ? "Expense" : "Income"}
+                        <div className={`${styles.typeBadge} ${isExpense ? styles.badgeExpense : isTransfer ? styles.badgeTransfer : styles.badgeIncome}`}>
+                          {isExpense ? "Expense" : isTransfer ? "Transfer" : "Income"}
                         </div>
                         <div className={styles.amountBlock}>
-                          <div className={`${styles.txnAmount} ${isExpense ? styles.textDanger : styles.textSuccess}`}>
+                          <div className={`${styles.txnAmount} ${isExpense ? styles.textDanger : isTransfer ? styles.textTransfer : styles.textSuccess}`}>
                             {formatCurrency(txn.amount, txn.type)}
                           </div>
                           <div className={styles.txnAccount}>{txn.account}</div>
                         </div>
-                        <button
-                          onClick={() => setEditingTransaction({
-                            id: txn.id,
-                            type: txn.type,
-                            amount: txn.amount,
-                            account_id: txn.account_id || "",
-                            category_id: txn.category_id || null,
-                            date: txn.date || new Date().toISOString(),
-                            note: txn.note || txn.merchant || "",
-                            source: "transaction",
-                          })}
-                          disabled={isPending}
-                          className={styles.deleteBtn}
-                          title="Edit Transaction"
-                          style={{ color: "var(--accent)" }}
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteClick(txn.id, txn.merchant)}
-                          disabled={isPending}
-                          className={styles.deleteBtn}
-                          title="Delete Transaction"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
 
+                        {/* ===== ACTION BUTTONS ===== */}
+                        {isSplitGroup ? (
+                          // Split parent: Edit (whole group) + Delete (all) + Expand/Collapse
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingTransaction({
+                                  id: txn.children[0].id,  // representative id (not used for split group action)
+                                  type: txn.type,
+                                  amount: txn.amount,
+                                  account_id: txn.account_id || "",
+                                  category_id: txn.category_id || null,
+                                  date: txn.date || new Date().toISOString(),
+                                  note: txn.note || txn.merchant || "",
+                                  source: "transaction",
+                                  splitGroupId: txn.splitGroupId,
+                                  splitChildren: txn.children,
+                                });
+                              }}
+                              disabled={isPending}
+                              className={styles.deleteBtn}
+                              title="Edit entire split"
+                              style={{ color: "var(--accent)" }}
+                            >
+                              <Pencil size={15} />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteClick(txn.splitGroupId, txn.merchant, true); }}
+                              disabled={isPending}
+                              className={styles.deleteBtn}
+                              title="Delete all split items"
+                              style={{ color: "var(--danger)" }}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                            <button
+                              className={styles.expandBtn}
+                              onClick={(e) => { e.stopPropagation(); toggleSplitExpand(txn.splitGroupId); }}
+                              title={isExpanded ? "Collapse" : "Expand split details"}
+                            >
+                              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </button>
+                          </div>
+                        ) : (
+                          // Regular transaction: Edit + Delete
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <button
+                              onClick={() => setEditingTransaction({
+                                id: txn.id,
+                                type: txn.type,
+                                amount: txn.amount,
+                                account_id: txn.account_id || "",
+                                category_id: txn.category_id || null,
+                                date: txn.date || new Date().toISOString(),
+                                note: txn.note || txn.merchant || "",
+                                source: "transaction",
+                              })}
+                              disabled={isPending}
+                              className={styles.deleteBtn}
+                              title="Edit Transaction"
+                              style={{ color: "var(--accent)" }}
+                            >
+                              <Pencil size={15} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteClick(txn.id, txn.merchant)}
+                              disabled={isPending}
+                              className={styles.deleteBtn}
+                              title="Delete Transaction"
+                              style={{ color: "var(--danger)" }}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Expanded Split Children */}
+                    {isSplitGroup && isExpanded && (
+                      <div className={styles.splitChildren}>
+                        {txn.children.map((child: any) => {
+                          const childIsExpense = child.type === "expense";
+                          const childIsTransfer = child.type === "transfer";
+                          return (
+                            <div key={child.id} className={styles.splitChildRow}>
+                              <div className={styles.childLeft}>
+                                <div className={styles.splitConnector}>
+                                  <div className={styles.splitConnectorLine} />
+                                  <div className={styles.splitConnectorDot} />
+                                </div>
+                                <div className={styles.childIconWrap}>
+                                  {childIsTransfer ? "👤" : child.icon || getIcon(child.category)}
+                                </div>
+                                <div>
+                                  <div className={styles.childLabel}>
+                                    {childIsTransfer
+                                      ? `Transfer → ${child.transfer_account_name || 'Account'}`
+                                      : child.category || 'Uncategorized'}
+                                  </div>
+                                  {child.note && (
+                                    <div className={styles.childNote}>{child.note}</div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className={styles.childRight}>
+                                <span className={`${styles.childAmount} ${childIsExpense ? styles.textDanger : childIsTransfer ? styles.textTransfer : styles.textSuccess}`}>
+                                  {formatCurrency(child.amount, child.type)}
+                                </span>
+                                {/* Edit child — isSplitChild flag hides the split toggle in modal */}
+                                <button
+                                  onClick={() => setEditingTransaction({
+                                    id: child.id,
+                                    type: child.type,
+                                    amount: child.amount,
+                                    account_id: child.account_id || "",
+                                    category_id: child.category_id || null,
+                                    date: child.date || new Date().toISOString(),
+                                    note: child.note || "",
+                                    source: "transaction",
+                                    isSplitChild: true,
+                                  })}
+                                  disabled={isPending}
+                                  className={styles.childEditBtn}
+                                  title="Edit this split item"
+                                >
+                                  <Pencil size={12} />
+                                </button>
+                                {/* Delete individual child */}
+                                <button
+                                  onClick={() => handleDeleteClick(child.id, child.category || child.note || 'Split item')}
+                                  disabled={isPending}
+                                  className={styles.childEditBtn}
+                                  title="Delete this split item"
+                                  style={{ color: 'var(--danger)' }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                     </div>
                   );
                 })}
@@ -393,8 +612,12 @@ export default function TransactionsView({ transactions, currency, categories = 
         isOpen={!!deletingId}
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
-        title="Delete Transaction"
-        message={`Are you sure you want to delete "${deletingName}"? This will adjust your account balance and cannot be undone.`}
+        title={deletingIsSplitGroup ? "Delete All Split Items" : "Delete Transaction"}
+        message={
+          deletingIsSplitGroup
+            ? `This will delete all split items in "${deletingName}" and reverse their balance effects. This cannot be undone.`
+            : `Are you sure you want to delete "${deletingName}"? This will adjust your account balance and cannot be undone.`
+        }
         confirmText="Delete"
         variant="danger"
         isPending={isPending}

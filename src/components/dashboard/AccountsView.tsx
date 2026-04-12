@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useUIStore } from "@/store/useUIStore";
-import { Plus, Pencil, Mail, ChevronDown, ChevronUp, Check, X } from "lucide-react";
+import { Plus, Pencil, Mail, ChevronDown, ChevronUp, Check, X, UserPlus, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { EditAccountModal } from "@/components/ui/EditAccountModal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Landmark } from "lucide-react";
@@ -44,6 +44,12 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
   const [isPending, startTransition] = useTransition();
   const [editingAccount, setEditingAccount] = useState<any>(null);
 
+  // Separate contacts from regular accounts
+  const bankAccounts = useMemo(() => accounts.filter(a => a.type !== 'contact'), [accounts]);
+  const contactAccounts = useMemo(() => accounts.filter(a => a.type === 'contact'), [accounts]);
+  const bankNetWorth = useMemo(() => bankAccounts.reduce((s, a) => s + Number(a.balance), 0), [bankAccounts]);
+  const totalReceivable = useMemo(() => contactAccounts.reduce((s, a) => s + Number(a.balance), 0), [contactAccounts]);
+
   // Controls which account card has its alert section open
   const [openAlertId, setOpenAlertId] = useState<string | null>(null);
   const [alertForms, setAlertForms] = useState<Record<string, AlertFormState>>({});
@@ -61,6 +67,7 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
       case "cash": return "💵";
       case "investment": return "📈";
       case "savings": return "🏦";
+      case "contact": return "👤";
       default: return "🏦";
     }
   };
@@ -70,6 +77,7 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
       case "bank": return styles.badgeBank;
       case "credit_card": return styles.badgeCredit;
       case "cash": return styles.badgeCash;
+      case "contact": return styles.badgeContact;
       default: return styles.badgeBank;
     }
   };
@@ -81,6 +89,7 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
       case "cash": return "Cash";
       case "investment": return "Investment";
       case "savings": return "Savings";
+      case "contact": return "Contact";
       default: return "Account";
     }
   };
@@ -161,9 +170,17 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
           <div className={styles.heroLabel}>
             <span className={styles.heroLabelSpan}></span> Total Net Worth
           </div>
-          <div className={styles.heroAmount}>{formatCurrency(netWorth)}</div>
+          <div className={styles.heroAmount}>{formatCurrency(bankNetWorth)}</div>
           <div className={styles.heroSubtext}>
-            Across {accounts.length} account{accounts.length !== 1 ? "s" : ""}
+            Across {bankAccounts.length} account{bankAccounts.length !== 1 ? "s" : ""}
+            {contactAccounts.length > 0 && (
+              <span style={{ marginLeft: '12px', padding: '2px 8px', borderRadius: '8px', background: 'rgba(255,255,255,0.15)', fontSize: '12px' }}>
+                {totalReceivable >= 0 
+                  ? `+${formatCurrency(totalReceivable)} receivable`
+                  : `${formatCurrency(totalReceivable)} payable`
+                }
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -180,9 +197,11 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
           />
         </div>
       ) : (
+        <>
+        {/* ========== BANK ACCOUNTS SECTION ========== */}
         <div className={styles.cardsGrid}>
         
-        {accounts.map((acc: any) => {
+        {bankAccounts.map((acc: any) => {
           const isNegative = acc.balance < 0;
           const profile = getProfile(acc.id);
           const form = alertForms[acc.id] || { emailSender: "", customSender: "", last4: "" };
@@ -333,6 +352,130 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
           <span>Add New Account</span>
         </div>
         </div>
+
+        {/* ========== CONTACTS SECTION ========== */}
+        {contactAccounts.length > 0 && (
+          <div style={{ marginTop: '8px' }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '16px',
+            }}>
+              <div>
+                <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                  👥 People & Contacts
+                </h2>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  Track who owes you and who you owe — your built-in Splitwise
+                </p>
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setAddAccountModalOpen(true)}
+                style={{ gap: '6px' }}
+              >
+                <UserPlus size={14} />
+                Add Contact
+              </button>
+            </div>
+
+            <div className={styles.cardsGrid}>
+              {contactAccounts.map((acc: any) => {
+                const balance = Number(acc.balance);
+                const isPositive = balance > 0;
+                const isZero = Math.abs(balance) < 0.01;
+
+                return (
+                  <div key={acc.id} className={styles.accountCard} style={{
+                    borderColor: isZero ? 'var(--border)' : isPositive ? 'var(--success)' : 'var(--danger)',
+                    borderWidth: isZero ? '1px' : '1.5px',
+                  }}>
+                    <div className={styles.cardHeader}>
+                      <div className={styles.cardIcon} style={{
+                        background: isPositive ? 'var(--success-light)' : isZero ? 'var(--bg)' : 'var(--danger-light)',
+                        fontSize: '20px',
+                      }}>
+                        👤
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className={`${styles.cardBadge} ${styles.badgeContact}`}>
+                          Contact
+                        </div>
+                        <button
+                          className={styles.editBtn}
+                          onClick={(e) => { e.stopPropagation(); setEditingAccount(acc); }}
+                          title="Edit Contact"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className={styles.cardName} style={{ marginBottom: '8px', fontSize: '16px', fontWeight: 600 }}>{acc.name}</div>
+
+                    {isZero ? (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '8px 12px',
+                        background: 'var(--bg)',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        color: 'var(--text-secondary)',
+                        fontWeight: 500,
+                      }}>
+                        ✅ All settled up!
+                      </div>
+                    ) : (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        background: isPositive ? 'var(--success-light)' : 'var(--danger-light)',
+                        borderRadius: '10px',
+                      }}>
+                        {isPositive ? (
+                          <ArrowDownLeft size={16} style={{ color: 'var(--success)' }} />
+                        ) : (
+                          <ArrowUpRight size={16} style={{ color: 'var(--danger)' }} />
+                        )}
+                        <div style={{ flex: 1 }}>
+                          <div style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            textTransform: 'uppercase' as const,
+                            letterSpacing: '0.5px',
+                            color: isPositive ? 'var(--success)' : 'var(--danger)',
+                            marginBottom: '2px',
+                          }}>
+                            {isPositive ? 'Owes You' : 'You Owe'}
+                          </div>
+                          <div style={{
+                            fontSize: '18px',
+                            fontWeight: 700,
+                            color: isPositive ? 'var(--success)' : 'var(--danger)',
+                          }}>
+                            {formatCurrency(Math.abs(balance))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Add new contact card */}
+              <div className={styles.addNewCard} onClick={() => setAddAccountModalOpen(true)}>
+                <UserPlus size={20} />
+                <span>Add Contact</span>
+              </div>
+            </div>
+          </div>
+        )}
+        </>
       )}
 
       {/* Edit Account Modal */}

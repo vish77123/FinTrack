@@ -116,6 +116,7 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
           <option value="cash">Cash Wallet</option>
           <option value="investment">Investment</option>
           <option value="savings">Savings</option>
+          <option value="contact">Contact / Roommate</option>
         </select>
       </div>
 
