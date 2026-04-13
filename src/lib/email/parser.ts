@@ -55,16 +55,9 @@ function parseAmount(raw: string): number {
 // ═══════════════════════════════════════════════════════════
 
 function extractLast4(text: string): string {
-  // Match "ending XXXXX" — take last 4 digits from any trailing digit sequence
-  // (Amex uses 5-digit card references like "51005")
-  const endingMatch = text.match(/(?:card|account|a\/c)\s+ending\s*:?\s*(\d{4,6})\b/i);
-  if (endingMatch) {
-    const digits = endingMatch[1];
-    return digits.slice(-4);
-  }
-  // "from account XX6842" or "a/c *6842"
+  // "from account 6842" or "from account XX6842" or "a/c *6842"
   const patterns = [
-    /(?:a\/c|acct?|account|card)\s*(?:no\.?\s*)?(?:XX|xx|\*{2,})?\s*(\d{4})\b/i,
+    /(?:a\/c|acct?|account|card)\s*(?:no\.?\s*)?(?:ending\s*)?(?:XX|xx|\*{2,})?\s*(\d{4})\b/i,
     /(?:XX|xx|X{2,}|x{2,}|\*{2,})(\d{4})\b/,
     /(?:debited from|credited to)\s*(?:account|a\/c)?\s*(\d{4})\b/i,
   ];
@@ -76,24 +69,10 @@ function extractLast4(text: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════
-// MERCHANT EXTRACTION — updated for Amex SafeKey format
+// MERCHANT EXTRACTION — handles HDFC-style "to VPA xxx MERCHANT_NAME on DATE"
 // ═══════════════════════════════════════════════════════════
 
 function extractMerchant(text: string): string {
-  // Amex SafeKey OTP: "One-Time Password for INR 175.00 at AMAZON is"
-  const amexOtp = text.match(/(?:one-time password|otp|safekey)\s+for\s+(?:INR|Rs\.?)\s*[\d,]+\.?\d*\s+at\s+([A-Z][A-Za-z0-9\s&'.,-]+?)(?:\s+is[:\s]|\s+to\s|\.|$)/i);
-  if (amexOtp) {
-    const m = amexOtp[1].trim();
-    if (m.length > 1 && m.length < 80) return m;
-  }
-
-  // Generic INR/Rs at MERCHANT: "INR 175 at AMAZON"
-  const inrAt = text.match(/(?:INR|Rs\.?)\s*[\d,]+\.?\d*\s+at\s+([A-Z][A-Za-z0-9\s&'.,-]+?)(?:\s+is[:\s]|\.|$)/i);
-  if (inrAt) {
-    const m = inrAt[1].trim();
-    if (m.length > 1 && m.length < 80) return m;
-  }
-
   // HDFC UPI: "to VPA <id>@<handle> MERCHANT NAME on DD-MM-YY"
   const hdfcUpi = text.match(/to\s+VPA\s+\S+\s+(.+?)\s+on\s+\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4}/i);
   if (hdfcUpi) {
@@ -112,6 +91,7 @@ function extractMerchant(text: string): string {
   const toMatch = text.match(/\bto\s+([A-Z][A-Za-z0-9\s&'.,-]+?)(?:\s+on\s+\d|\.|$)/i);
   if (toMatch) {
     const m = toMatch[1].trim();
+    // Filter out VPA IDs and generic words
     if (m.length > 2 && m.length < 60 && !m.includes("@") && !m.match(/^(VPA|UPI|your|the|a\/c)/i)) {
       return m;
     }
@@ -158,30 +138,19 @@ interface Pattern {
 }
 
 const PATTERNS: Pattern[] = [
-  // ── AMEX / OTP-STYLE PURCHASE ALERTS ────────────────────
-  {
-    name: "amex_safekey_otp",
-    // "Your One-Time Password for INR 175.00 at AMAZON is:"
-    // Also matches "OTP for INR 500 at FLIPKART"
-    regex: /(?:one-time password|otp|safekey)\s+for\s+(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s+at\s+/i,
-    type: "expense",
-    amountGroup: 1,
-    confidence: 0.90,
-  },
-
   // ── DEBIT PATTERNS ──────────────────────────────────────
   {
-    name: "Rs_or_INR_debited_account",
+    name: "Rs_debited_account",
     // "Rs.40.00 has been debited from account 6842"
-    // "INR 1,500 debited from a/c XX1234"
-    regex: /(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s*(?:has been\s*)?debited\s*(?:from\s*)?(?:your\s*)?(?:a\/c|acct?|account)\s*(?:no\.?\s*)?(?:XX|xx|\*{2,})?\s*(\d{4,6})/i,
+    // "Rs 1,500 debited from a/c XX1234"
+    regex: /Rs\.?\s*([\d,]+\.?\d*)\s*(?:has been\s*)?debited\s*(?:from\s*)?(?:your\s*)?(?:a\/c|acct?|account)\s*(?:no\.?\s*)?(?:XX|xx|\*{2,})?\s*(\d{4})/i,
     type: "expense",
     amountGroup: 1,
     confidence: 0.95,
   },
   {
-    name: "debited_Rs_or_INR",
-    // "debited by Rs.500" or "debited with INR 200"
+    name: "debited_Rs",
+    // "debited by Rs.500" or "debited with Rs 200"
     regex: /debited\s*(?:by|with|for)?\s*(?:INR|Rs\.?)\s*([\d,]+\.?\d*)/i,
     type: "expense",
     amountGroup: 1,
@@ -189,32 +158,32 @@ const PATTERNS: Pattern[] = [
   },
   {
     name: "spent_card",
-    // "Rs.2,499 spent" or "INR 2499 spent"
-    regex: /(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s*spent/i,
+    // "Rs.2,499 spent on HDFC Credit Card XX1234 at Swiggy"
+    regex: /Rs\.?\s*([\d,]+\.?\d*)\s*spent/i,
     type: "expense",
     amountGroup: 1,
     confidence: 0.90,
   },
   {
     name: "ATM",
-    // "ATM WDL of Rs.5,000" or "ATM WDL of INR 5000"
-    regex: /ATM\s*(?:WDL|withdrawal|cash)\s*(?:of\s*)?(?:INR|Rs\.?)\s*([\d,]+\.?\d*)/i,
+    // "ATM WDL of Rs.5,000"
+    regex: /ATM\s*(?:WDL|withdrawal|cash)\s*(?:of\s*)?Rs\.?\s*([\d,]+\.?\d*)/i,
     type: "expense",
     amountGroup: 1,
     confidence: 0.95,
   },
   {
     name: "auto_debit",
-    // "Auto-debit of Rs.3,500 towards Loan" or "INR 3500 auto-debited"
-    regex: /(?:auto[- ]?debit|emi|standing instruction|mandate)\s*(?:of\s*)?(?:INR|Rs\.?)\s*([\d,]+\.?\d*)/i,
+    // "Auto-debit of Rs.3,500 towards Loan"
+    regex: /(?:auto[- ]?debit|emi|standing instruction|mandate)\s*(?:of\s*)?Rs\.?\s*([\d,]+\.?\d*)/i,
     type: "expense",
     amountGroup: 1,
     confidence: 0.90,
   },
   {
     name: "IMPS_NEFT_debit",
-    // "IMPS of Rs.500 done" or "NEFT INR 1000 sent"
-    regex: /(?:IMPS|NEFT|RTGS)\s*(?:of\s*)?(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s*(?:done|sent|transferred)/i,
+    // "IMPS of Rs.500 done" or "NEFT Rs.1000 sent"
+    regex: /(?:IMPS|NEFT|RTGS)\s*(?:of\s*)?Rs\.?\s*([\d,]+\.?\d*)\s*(?:done|sent|transferred)/i,
     type: "expense",
     amountGroup: 1,
     confidence: 0.90,
@@ -222,16 +191,16 @@ const PATTERNS: Pattern[] = [
 
   // ── CREDIT PATTERNS ─────────────────────────────────────
   {
-    name: "Rs_or_INR_credited_account",
-    // "Rs.1,200 credited to a/c XX1234" or "INR 1200 credited to account"
-    regex: /(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s*(?:has been\s*)?credited\s*(?:to\s*)?(?:your\s*)?(?:a\/c|acct?|account)\s*(?:no\.?\s*)?(?:XX|xx|\*{2,})?\s*(\d{4,6})/i,
+    name: "Rs_credited_account",
+    // "Rs.1,200 credited to a/c XX1234"
+    regex: /Rs\.?\s*([\d,]+\.?\d*)\s*(?:has been\s*)?credited\s*(?:to\s*)?(?:your\s*)?(?:a\/c|acct?|account)\s*(?:no\.?\s*)?(?:XX|xx|\*{2,})?\s*(\d{4})/i,
     type: "income",
     amountGroup: 1,
     confidence: 0.95,
   },
   {
-    name: "credited_Rs_or_INR",
-    // "credited with Rs.500" or "INR 500 credited"
+    name: "credited_Rs",
+    // "credited with Rs.500"
     regex: /credited\s*(?:by|with)?\s*(?:INR|Rs\.?)\s*([\d,]+\.?\d*)/i,
     type: "income",
     amountGroup: 1,
@@ -239,8 +208,8 @@ const PATTERNS: Pattern[] = [
   },
   {
     name: "IMPS_NEFT_credit",
-    // "IMPS of INR 500 received"
-    regex: /(?:IMPS|NEFT|RTGS)\s*(?:of\s*)?(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s*(?:received|credited)/i,
+    // "IMPS of Rs.500 received"
+    regex: /(?:IMPS|NEFT|RTGS)\s*(?:of\s*)?Rs\.?\s*([\d,]+\.?\d*)\s*(?:received|credited)/i,
     type: "income",
     amountGroup: 1,
     confidence: 0.90,
@@ -248,28 +217,20 @@ const PATTERNS: Pattern[] = [
 
   // ── GENERIC FALLBACKS ───────────────────────────────────
   {
-    name: "generic_INR_debited",
-    // "INR 500.00 debited" or "Rs.500 deducted"
+    name: "generic_Rs_debited",
+    // "Rs.500 debited" or "INR 500.00 debited" or "INR 500 deducted"
     regex: /(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s*(?:has been\s*)?(?:debited|deducted)/i,
     type: "expense",
     amountGroup: 1,
     confidence: 0.80,
   },
   {
-    name: "generic_INR_credited",
-    // "INR 500.00 credited" or "Rs.500 credited"
+    name: "generic_Rs_credited",
+    // "Rs.500 credited" or "INR 500.00 credited"
     regex: /(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s*(?:has been\s*)?credited/i,
     type: "income",
     amountGroup: 1,
     confidence: 0.80,
-  },
-  {
-    name: "generic_INR_at_merchant",
-    // "INR 175.00 at AMAZON" — Amex-style standalone transaction mentions
-    regex: /(?:INR|Rs\.?)\s*([\d,]+\.?\d*)\s+at\s+([A-Z][A-Za-z0-9\s&'.,-]+?)(?:\s+is[:\s]|\.|$)/i,
-    type: "expense",
-    amountGroup: 1,
-    confidence: 0.75,
   },
 ];
 
@@ -278,44 +239,21 @@ const PATTERNS: Pattern[] = [
 // ═══════════════════════════════════════════════════════════
 
 export const KNOWN_BANK_SENDERS = [
-  // HDFC Bank
   "alerts@hdfcbank.bank.in",
   "alerts@hdfcbank.net",
   "alerts@hdfcbank.com",
   "creditcardalerts@hdfcbank.com",
-  // SBI
   "noreply@sbi.co.in",
   "alerts@sbi.co.in",
-  // ICICI
   "alerts@icicibank.com",
   "noreply@icicibank.com",
-  // Axis
   "alerts@axisbank.com",
-  // Kotak
   "alerts.service@kotak.com",
   "alerts@kotak.com",
-  // Yes Bank
   "alerts@yesbank.in",
-  // PNB
   "alerts@pnb.co.in",
-  // Paytm
   "noreply@paytmbank.com",
-  // IndusInd
   "alerts@indusind.com",
-  // American Express
-  "americanexpress@welcome.americanexpress.com",
-  "welcome.americanexpress.com",
-  // Citibank
-  "citibank@alerts.citibank.co.in",
-  "alerts.citibank.co.in",
-  // Standard Chartered
-  "alerts@sc.com",
-  // IDFC First
-  "alerts@idfcfirstbank.com",
-  // RBL Bank
-  "alerts@rblbank.com",
-  // AU Small Finance Bank
-  "alerts@aubank.in",
 ];
 
 // ═══════════════════════════════════════════════════════════
