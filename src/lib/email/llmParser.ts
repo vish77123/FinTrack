@@ -11,7 +11,7 @@ import { GoogleGenAI } from "@google/genai";
 
 export interface LLMParsedTransaction {
   amount: number;
-  type: "income" | "expense";
+  type: "income" | "expense" | "cc_payment";
   merchant: string;
   date: string;
   accountLast4?: string;
@@ -259,7 +259,13 @@ For EACH email, extract:
 1. "emailId" — the ID provided in the header (copy it exactly)
 2. "amount" — clean number (e.g. 500.50)
 3. "merchant" — payee name, cleaned up
-4. "type" — "expense" if debited/spent/paid, "income" if credited/received
+4. "type" — use one of the following:
+   - "expense": money debited/spent/charged on a bank account or credit card
+   - "income": money credited/received into a bank or cash account (NOT a CC payment)
+   - "cc_payment": a payment made TOWARD a credit card bill. Identify cc_payment when
+     the alert says 'payment received', 'payment processed', or 'bill payment' on a
+     credit card. This is NOT income — it is debt reduction on the card balance.
+   - "transfer": money moved between two bank/savings accounts (no CC involved)
 5. "accountLast4" — 4-digit account/card reference if present
 6. "date" — ISO 8601 date string if explicitly mentioned in text
 7. "categoryId" — Use the provided "Existing User Categories". If the merchant fits cleanly into one, return its ID. If NOT, leave it null.
@@ -291,7 +297,7 @@ ${emailsBlock}
               emailId: { type: "STRING" },
               amount: { type: "NUMBER" },
               merchant: { type: "STRING" },
-              type: { type: "STRING", enum: ["income", "expense"] },
+              type: { type: "STRING", enum: ["income", "expense", "cc_payment", "transfer"] },
               accountLast4: { type: "STRING" },
               date: { type: "STRING" },
               categoryId: { type: "STRING" },
@@ -342,8 +348,8 @@ ${emailsBlock}
 
         results.set(item.emailId, {
           amount: Number(item.amount),
-          type: item.type === "income" ? "income" : "expense",
-          merchant: item.merchant || "Bank Transaction",
+          type: ["income", "expense", "cc_payment", "transfer"].includes(item.type) ? item.type : "expense",
+          merchant: item.merchant || (item.type === "cc_payment" ? "Credit Card Payment" : "Bank Transaction"),
           date: item.date || new Date().toISOString().split("T")[0],
           accountLast4: item.accountLast4 || undefined,
           confidence: 0.80,

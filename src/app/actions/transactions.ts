@@ -4,9 +4,10 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
+// cc_payment is used in the pending/parsing layer; stored as 'transfer' in main transactions
 const transactionSchema = z.object({
   amount: z.number().positive("Amount must be greater than zero."),
-  type: z.enum(["income", "expense", "transfer"]),
+  type: z.enum(["income", "expense", "transfer", "cc_payment"]),
   account_id: z.string().uuid("Please select a valid account."),
   category_id: z.string().optional().nullable(),
   date: z.string().datetime(), // expects ISO string
@@ -14,21 +15,160 @@ const transactionSchema = z.object({
   transfer_to_account_id: z.string().uuid().optional().nullable(),
 });
 
+// ─────────────────────────────────────────────────────────────
+// CREDIT CARD-AWARE BALANCE UPDATE
+// Fetches account type before deciding which column to update.
+// ─────────────────────────────────────────────────────────────
 async function applyBalanceUpdate(supabase: any, payload: any) {
-  const amount = payload.amount;
-  if (payload.type === "expense") {
-    const { data: account } = await supabase.from("accounts").select("balance").eq("id", payload.account_id).single();
-    if (account) await supabase.from("accounts").update({ balance: Number(account.balance) - amount }).eq("id", payload.account_id);
-  } else if (payload.type === "income") {
-    const { data: account } = await supabase.from("accounts").select("balance").eq("id", payload.account_id).single();
-    if (account) await supabase.from("accounts").update({ balance: Number(account.balance) + amount }).eq("id", payload.account_id);
-  } else if (payload.type === "transfer") {
-    const { data: fromAccount } = await supabase.from("accounts").select("balance").eq("id", payload.account_id).single();
-    if (fromAccount) await supabase.from("accounts").update({ balance: Number(fromAccount.balance) - amount }).eq("id", payload.account_id);
+  const amount = Number(payload.amount);
 
+  if (payload.type === "expense" || payload.type === "income" || payload.type === "cc_payment") {
+    // Fetch account type to determine which logic to use
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("type, balance, outstanding_balance")
+      .eq("id", payload.account_id)
+      .single();
+
+    if (!account) return;
+
+    if (account.type === "credit_card") {
+      // Credit card: expense = more debt, income/cc_payment = less debt (floor 0)
+      const delta = payload.type === "expense" ? amount : -amount;
+      const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
+      await supabase
+        .from("accounts")
+        .update({ outstanding_balance: newOutstanding })
+        .eq("id", payload.account_id);
+    } else {
+      // Bank / cash / savings / contact: original balance logic
+      const delta = payload.type === "income" ? amount : -amount;
+      const newBalance = (Number(account.balance) || 0) + delta;
+      await supabase
+        .from("accounts")
+        .update({ balance: newBalance })
+        .eq("id", payload.account_id);
+    }
+
+  } else if (payload.type === "transfer") {
+    // Source account (always reduces)
+    const { data: fromAccount } = await supabase
+      .from("accounts")
+      .select("type, balance, outstanding_balance")
+      .eq("id", payload.account_id)
+      .single();
+
+    if (fromAccount) {
+      if (fromAccount.type === "credit_card") {
+        // Paying FROM a credit card (unusual, but handle it as an expense on CC)
+        const newOutstanding = Math.max(0, (Number(fromAccount.outstanding_balance) || 0) + amount);
+        await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
+      } else {
+        await supabase
+          .from("accounts")
+          .update({ balance: (Number(fromAccount.balance) || 0) - amount })
+          .eq("id", payload.account_id);
+      }
+    }
+
+    // Destination account
     if (payload.transfer_to_account_id) {
-      const { data: toAccount } = await supabase.from("accounts").select("balance").eq("id", payload.transfer_to_account_id).single();
-      if (toAccount) await supabase.from("accounts").update({ balance: Number(toAccount.balance) + amount }).eq("id", payload.transfer_to_account_id);
+      const { data: toAccount } = await supabase
+        .from("accounts")
+        .select("type, balance, outstanding_balance")
+        .eq("id", payload.transfer_to_account_id)
+        .single();
+
+      if (toAccount) {
+        if (toAccount.type === "credit_card") {
+          // Bill payment: reduce outstanding debt
+          const newOutstanding = Math.max(0, (Number(toAccount.outstanding_balance) || 0) - amount);
+          await supabase
+            .from("accounts")
+            .update({ outstanding_balance: newOutstanding })
+            .eq("id", payload.transfer_to_account_id);
+        } else {
+          // Normal transfer: increase destination balance
+          await supabase
+            .from("accounts")
+            .update({ balance: (Number(toAccount.balance) || 0) + amount })
+            .eq("id", payload.transfer_to_account_id);
+        }
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// REVERSE BALANCE UPDATE (for delete/edit flows)
+// ─────────────────────────────────────────────────────────────
+export async function reverseBalanceUpdate(supabase: any, payload: {
+  type: string;
+  amount: number;
+  account_id: string;
+  transfer_to_account_id?: string | null;
+}) {
+  const amount = Number(payload.amount);
+
+  if (payload.type === "expense" || payload.type === "income" || payload.type === "cc_payment") {
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("type, balance, outstanding_balance")
+      .eq("id", payload.account_id)
+      .single();
+
+    if (!account) return;
+
+    if (account.type === "credit_card") {
+      // Reverse: expense reversal = decrease outstanding; income reversal = increase outstanding
+      const delta = payload.type === "expense" ? -amount : amount;
+      const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
+      await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
+    } else {
+      const delta = payload.type === "income" ? -amount : amount;
+      const newBalance = (Number(account.balance) || 0) + delta;
+      await supabase.from("accounts").update({ balance: newBalance }).eq("id", payload.account_id);
+    }
+  } else if (payload.type === "transfer") {
+    // Reverse source: add back to source
+    const { data: fromAccount } = await supabase
+      .from("accounts")
+      .select("type, balance, outstanding_balance")
+      .eq("id", payload.account_id)
+      .single();
+
+    if (fromAccount) {
+      if (fromAccount.type === "credit_card") {
+        const newOutstanding = Math.max(0, (Number(fromAccount.outstanding_balance) || 0) - amount);
+        await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
+      } else {
+        await supabase
+          .from("accounts")
+          .update({ balance: (Number(fromAccount.balance) || 0) + amount })
+          .eq("id", payload.account_id);
+      }
+    }
+
+    // Reverse destination: take back from destination
+    if (payload.transfer_to_account_id) {
+      const { data: toAccount } = await supabase
+        .from("accounts")
+        .select("type, balance, outstanding_balance")
+        .eq("id", payload.transfer_to_account_id)
+        .single();
+
+      if (toAccount) {
+        if (toAccount.type === "credit_card") {
+          // Reversing a payment: outstanding goes back up
+          const newOutstanding = (Number(toAccount.outstanding_balance) || 0) + amount;
+          await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.transfer_to_account_id);
+        } else {
+          await supabase
+            .from("accounts")
+            .update({ balance: (Number(toAccount.balance) || 0) - amount })
+            .eq("id", payload.transfer_to_account_id);
+        }
+      }
     }
   }
 }
@@ -71,7 +211,7 @@ export async function addTransactionAction(formData: FormData) {
       const { error: dbError } = await supabase.from("transactions").insert({
         user_id: user.id,
         amount: validated.data.amount,
-        type: validated.data.type,
+        type: validated.data.type === "cc_payment" ? "transfer" : validated.data.type,
         account_id: validated.data.account_id,
         category_id: validated.data.category_id,
         date: validated.data.date,
@@ -110,13 +250,13 @@ export async function addTransactionAction(formData: FormData) {
 
     const payload = validated.data;
 
-    // Insert into DB.
+    // Insert into DB; cc_payment stored as transfer in main transactions
     const { error: dbError } = await supabase
       .from("transactions")
       .insert({
         user_id: user.id,
         amount: payload.amount,
-        type: payload.type,
+        type: payload.type === "cc_payment" ? "transfer" : payload.type,
         account_id: payload.account_id,
         category_id: payload.category_id,
         date: payload.date,
@@ -164,23 +304,20 @@ export async function editTransactionAction(transactionId: string, formData: For
 
   if (!newAmount || newAmount <= 0) return { error: "Amount must be greater than zero." };
 
-  // Reverse old balance effect
-  if (existing.account_id) {
-    const { data: oldAcct } = await supabase.from("accounts").select("balance").eq("id", existing.account_id).single();
-    if (oldAcct) {
-      const reverseAmount = existing.type === "expense"
-        ? Number(oldAcct.balance) + Number(existing.amount)
-        : Number(oldAcct.balance) - Number(existing.amount);
-      await supabase.from("accounts").update({ balance: reverseAmount }).eq("id", existing.account_id);
-    }
-  }
+  // Reverse old balance effect (CC-aware)
+  await reverseBalanceUpdate(supabase, {
+    type: existing.type,
+    amount: Number(existing.amount),
+    account_id: existing.account_id,
+    transfer_to_account_id: existing.transfer_to_account_id,
+  });
 
   // Update the transaction row
   const { error: updateError } = await supabase
     .from("transactions")
     .update({
       amount: newAmount,
-      type: newType,
+      type: newType === "cc_payment" ? "transfer" : newType,
       account_id: newAccountId,
       category_id: newCategoryId,
       date: newDate,
@@ -191,14 +328,13 @@ export async function editTransactionAction(transactionId: string, formData: For
 
   if (updateError) return { error: "Failed to update transaction." };
 
-  // Apply new balance effect
-  const { data: newAcct } = await supabase.from("accounts").select("balance").eq("id", newAccountId).single();
-  if (newAcct) {
-    const newBalance = newType === "expense"
-      ? Number(newAcct.balance) - newAmount
-      : Number(newAcct.balance) + newAmount;
-    await supabase.from("accounts").update({ balance: newBalance }).eq("id", newAccountId);
-  }
+  // Apply new balance effect (CC-aware)
+  await applyBalanceUpdate(supabase, {
+    type: newType,
+    amount: newAmount,
+    account_id: newAccountId,
+    transfer_to_account_id: formData.get("transfer_to_account_id") as string || null,
+  });
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
@@ -266,21 +402,12 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
     if (!siblings || siblings.length === 0) return { error: "Split group not found." };
 
     for (const sibling of siblings) {
-      const amt = Number(sibling.amount);
-      if (sibling.type === "expense") {
-        const { data: a } = await supabase.from("accounts").select("balance").eq("id", sibling.account_id).single();
-        if (a) await supabase.from("accounts").update({ balance: Number(a.balance) + amt }).eq("id", sibling.account_id);
-      } else if (sibling.type === "income") {
-        const { data: a } = await supabase.from("accounts").select("balance").eq("id", sibling.account_id).single();
-        if (a) await supabase.from("accounts").update({ balance: Number(a.balance) - amt }).eq("id", sibling.account_id);
-      } else if (sibling.type === "transfer") {
-        const { data: from } = await supabase.from("accounts").select("balance").eq("id", sibling.account_id).single();
-        if (from) await supabase.from("accounts").update({ balance: Number(from.balance) + amt }).eq("id", sibling.account_id);
-        if (sibling.transfer_to_account_id) {
-          const { data: to } = await supabase.from("accounts").select("balance").eq("id", sibling.transfer_to_account_id).single();
-          if (to) await supabase.from("accounts").update({ balance: Number(to.balance) - amt }).eq("id", sibling.transfer_to_account_id);
-        }
-      }
+      await reverseBalanceUpdate(supabase, {
+        type: sibling.type,
+        amount: Number(sibling.amount),
+        account_id: sibling.account_id,
+        transfer_to_account_id: sibling.transfer_to_account_id,
+      });
     }
 
     const { error: delErr } = await supabase
@@ -301,29 +428,13 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
 
     if (!existing) return { error: "Original transaction not found." };
 
-    // Reverse balance effects (source account)
-    if (existing.account_id) {
-      const { data: srcAcct } = await supabase
-        .from("accounts").select("balance").eq("id", existing.account_id).single();
-      if (srcAcct) {
-        const reversed =
-          existing.type === "expense"
-            ? Number(srcAcct.balance) + Number(existing.amount)
-            : existing.type === "income"
-            ? Number(srcAcct.balance) - Number(existing.amount)
-            : Number(srcAcct.balance) + Number(existing.amount);
-        await supabase.from("accounts").update({ balance: reversed }).eq("id", existing.account_id);
-      }
-    }
-    if (existing.type === "transfer" && existing.transfer_to_account_id) {
-      const { data: dstAcct } = await supabase
-        .from("accounts").select("balance").eq("id", existing.transfer_to_account_id).single();
-      if (dstAcct) {
-        await supabase.from("accounts")
-          .update({ balance: Number(dstAcct.balance) - Number(existing.amount) })
-          .eq("id", existing.transfer_to_account_id);
-      }
-    }
+    // Reverse balance effects (CC-aware)
+    await reverseBalanceUpdate(supabase, {
+      type: existing.type,
+      amount: Number(existing.amount),
+      account_id: existing.account_id,
+      transfer_to_account_id: existing.transfer_to_account_id,
+    });
 
     const { error: deleteError } = await supabase
       .from("transactions").delete().eq("id", idOrGroupId).eq("user_id", user.id);
@@ -367,7 +478,7 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
     const { error: insertError } = await supabase.from("transactions").insert({
       user_id: user.id,
       amount: validated.data.amount,
-      type: validated.data.type,
+      type: validated.data.type === "cc_payment" ? "transfer" : validated.data.type,
       account_id: validated.data.account_id,
       category_id: validated.data.category_id,
       date: validated.data.date,
@@ -396,13 +507,6 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
 /**
  * Collapses a split group back into a single normal transaction.
  * Called when the user edits a split parent and turns OFF split mode.
- *
- * Flow:
- * 1. Fetch all siblings by split_group_id
- * 2. Reverse every sibling's balance effect
- * 3. Delete all siblings
- * 4. Insert one fresh transaction using the formData values
- * 5. Apply balance update for the new single transaction
  */
 export async function collapseSplitToSingleAction(splitGroupId: string, formData: FormData) {
   const supabase = await createClient();
@@ -418,23 +522,14 @@ export async function collapseSplitToSingleAction(splitGroupId: string, formData
 
   if (!siblings || siblings.length === 0) return { error: "Split group not found." };
 
-  // 2. Reverse each sibling's balance
+  // 2. Reverse each sibling's balance (CC-aware)
   for (const sib of siblings) {
-    const amt = Number(sib.amount);
-    if (sib.type === "expense") {
-      const { data: a } = await supabase.from("accounts").select("balance").eq("id", sib.account_id).single();
-      if (a) await supabase.from("accounts").update({ balance: Number(a.balance) + amt }).eq("id", sib.account_id);
-    } else if (sib.type === "income") {
-      const { data: a } = await supabase.from("accounts").select("balance").eq("id", sib.account_id).single();
-      if (a) await supabase.from("accounts").update({ balance: Number(a.balance) - amt }).eq("id", sib.account_id);
-    } else if (sib.type === "transfer") {
-      const { data: from } = await supabase.from("accounts").select("balance").eq("id", sib.account_id).single();
-      if (from) await supabase.from("accounts").update({ balance: Number(from.balance) + amt }).eq("id", sib.account_id);
-      if (sib.transfer_to_account_id) {
-        const { data: to } = await supabase.from("accounts").select("balance").eq("id", sib.transfer_to_account_id).single();
-        if (to) await supabase.from("accounts").update({ balance: Number(to.balance) - amt }).eq("id", sib.transfer_to_account_id);
-      }
-    }
+    await reverseBalanceUpdate(supabase, {
+      type: sib.type,
+      amount: Number(sib.amount),
+      account_id: sib.account_id,
+      transfer_to_account_id: sib.transfer_to_account_id,
+    });
   }
 
   // 3. Delete all siblings
@@ -470,7 +565,7 @@ export async function collapseSplitToSingleAction(splitGroupId: string, formData
   const { error: insertError } = await supabase.from("transactions").insert({
     user_id: user.id,
     amount: validated.data.amount,
-    type: validated.data.type,
+    type: validated.data.type === "cc_payment" ? "transfer" : validated.data.type,
     account_id: validated.data.account_id,
     category_id: validated.data.category_id,
     date: validated.data.date,

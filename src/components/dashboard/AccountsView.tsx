@@ -47,7 +47,10 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
   // Separate contacts from regular accounts
   const bankAccounts = useMemo(() => accounts.filter(a => a.type !== 'contact'), [accounts]);
   const contactAccounts = useMemo(() => accounts.filter(a => a.type === 'contact'), [accounts]);
-  const bankNetWorth = useMemo(() => bankAccounts.reduce((s, a) => s + Number(a.balance), 0), [bankAccounts]);
+  const bankNetWorth = useMemo(() => bankAccounts.reduce((s, a) => {
+    if (a.type === 'credit_card') return s - (Number(a.outstanding_balance) || 0);
+    return s + Number(a.balance);
+  }, 0), [bankAccounts]);
   const totalReceivable = useMemo(() => contactAccounts.reduce((s, a) => s + Number(a.balance), 0), [contactAccounts]);
 
   // Controls which account card has its alert section open
@@ -202,146 +205,243 @@ export default function AccountsView({ accounts, netWorth, currency, alertProfil
         <div className={styles.cardsGrid}>
         
         {bankAccounts.map((acc: any) => {
+          // ── CREDIT CARD CARD ──────────────────────────────────────
+          if (acc.type === 'credit_card') {
+            const outstanding = Number(acc.outstanding_balance) || 0;
+            const limit       = Number(acc.credit_limit) || 0;
+            const available   = acc.availableCredit ?? (limit > 0 ? Math.max(0, limit - outstanding) : null);
+            const utilPct     = acc.utilizationPct ?? (limit > 0 ? Math.round((outstanding / limit) * 100 * 10) / 10 : null);
+            const daysUntilDue = acc.daysUntilDue ?? null;
+            const minPayment   = acc.minPaymentDue ?? 0;
+            const utilColor = utilPct === null ? 'var(--text-tertiary)' : utilPct < 30 ? 'var(--success)' : utilPct <= 60 ? 'var(--warning)' : 'var(--danger)';
+            const dueBg    = daysUntilDue === null ? 'var(--card)' : daysUntilDue <= 5 ? 'var(--danger-light)' : daysUntilDue <= 10 ? 'var(--warning-light)' : 'var(--card)';
+            const dueColor = daysUntilDue === null ? 'var(--text-secondary)' : daysUntilDue <= 5 ? 'var(--danger)' : daysUntilDue <= 10 ? 'var(--warning)' : 'var(--text-secondary)';
+            const profile  = getProfile(acc.id);
+            const form     = alertForms[acc.id] || { emailSender: '', customSender: '', last4: '' };
+            const isAlertOpen = openAlertId === acc.id;
+
+            return (
+              <div key={acc.id} className={`${styles.accountCard} ${isAlertOpen ? styles.accountCardExpanded : ''}`}
+                style={{ borderColor: outstanding > 0 ? 'var(--danger)' : 'var(--border)' }}
+              >
+                {/* Card Header */}
+                <div className={styles.cardHeader}>
+                  <div style={{
+                    width: '36px', height: '36px', borderRadius: '10px',
+                    background: 'linear-gradient(135deg, var(--danger) 0%, #ff6b9d 100%)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '18px',
+                  }}>💳</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div className={`${styles.cardBadge} ${getBadgeClass(acc.type)}`}>{getBadgeText(acc.type)}</div>
+                    <button className={styles.editBtn} onClick={e => { e.stopPropagation(); setEditingAccount(acc); }} title="Edit Account">
+                      <Pencil size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Account Name */}
+                <div className={styles.cardName} style={{ marginTop: '8px', marginBottom: '12px' }}>{acc.name}</div>
+
+                {/* Outstanding / Current Due / Unbilled / Available */}
+                <div style={{ marginBottom: '10px' }}>
+                  {/* Total Outstanding */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 500 }}>Outstanding</span>
+                    <span style={{ fontSize: '18px', fontWeight: 700, color: outstanding > 0 ? 'var(--danger)' : 'var(--text-primary)' }}>
+                      {formatCurrency(outstanding)}
+                    </span>
+                  </div>
+
+                  {/* Current Due */}
+                  {acc.statement_day && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 500 }}>Current Due</span>
+                      {acc.currentDuePaid ? (
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--success)' }}>Paid ✓</span>
+                      ) : (
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: (acc.currentDue || 0) > 0 ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                          {formatCurrency(acc.currentDue || 0)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Unbilled */}
+                  {acc.statement_day && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 500 }}>Unbilled</span>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: (acc.unbilled || 0) > 0 ? 'var(--warning)' : 'var(--text-secondary)' }}>
+                        {formatCurrency(acc.unbilled || 0)}
+                      </span>
+                    </div>
+                  )}
+
+                  {available !== null && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '2px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 500 }}>Available</span>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--success)' }}>{formatCurrency(available)}</span>
+                    </div>
+                  )}
+                  {limit > 0 && (
+                    <div style={{ textAlign: 'right', fontSize: '10px', color: 'var(--text-tertiary)' }}>Limit: {formatCurrency(limit)}</div>
+                  )}
+                </div>
+
+                {/* Utilization Bar */}
+                {utilPct !== null && (
+                  <div style={{ marginBottom: '10px' }}>
+                    <div style={{ height: '5px', borderRadius: '3px', background: 'var(--border)', overflow: 'hidden', marginBottom: '3px' }}>
+                      <div style={{
+                        height: '100%', borderRadius: '3px',
+                        width: `${Math.min(utilPct, 100)}%`,
+                        background: utilColor, transition: 'width 0.5s ease',
+                      }} />
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: '10px', color: utilColor, fontWeight: 600 }}>{utilPct}% used</div>
+                  </div>
+                )}
+
+                {/* Due Date Badge */}
+                {daysUntilDue !== null && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '4px',
+                      padding: '3px 8px', borderRadius: '20px',
+                      background: dueBg, fontSize: '11px', fontWeight: 600, color: dueColor,
+                    }}>
+                      {daysUntilDue <= 0
+                        ? '⚠️ Due Today!'
+                        : `📅 Due in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}${
+                            acc.nextDueDateStr ? ` · ${acc.nextDueDateStr}` : ''
+                          }`
+                      }
+                    </div>
+                    {minPayment > 0 && (
+                      <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '3px' }}>Min. payment {formatCurrency(minPayment)}</div>
+                    )}
+                  </div>
+                )}
+
+                <div className={styles.cardDivider} />
+
+                {/* Email Alert Section */}
+                <div className={styles.alertSection}>
+                  <button className={styles.alertToggle} onClick={() => toggleAlert(acc.id)}>
+                    <div className={styles.alertToggleLeft}>
+                      <Mail size={14} />
+                      <span>Email Alert Profile</span>
+                      {profile && <span className={styles.alertConfigured}>Configured</span>}
+                    </div>
+                    {isAlertOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+
+                  {isAlertOpen && (
+                    <div className={styles.alertPanel}>
+                      <p className={styles.alertHint}>Link this card to your bank's email alerts so CC charges can be auto-detected.</p>
+                      <div className={styles.alertField}>
+                        <label className={styles.alertLabel}>Bank Email Sender</label>
+                        <select className={styles.alertInput} value={form.emailSender} onChange={e => updateForm(acc.id, 'emailSender', e.target.value)}>
+                          <option value="">Select your bank…</option>
+                          {KNOWN_SENDERS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                        </select>
+                      </div>
+                      {form.emailSender === '__custom__' && (
+                        <div className={styles.alertField}>
+                          <label className={styles.alertLabel}>Custom Sender Email</label>
+                          <input type="email" className={styles.alertInput} placeholder="e.g. creditcardalerts@mybank.com" value={form.customSender} onChange={e => updateForm(acc.id, 'customSender', e.target.value)} />
+                        </div>
+                      )}
+                      <div className={styles.alertField}>
+                        <label className={styles.alertLabel}>Card Last 4 Digits</label>
+                        <input type="text" className={styles.alertInput} placeholder="e.g. 1234" maxLength={4} value={form.last4} onChange={e => updateForm(acc.id, 'last4', e.target.value.replace(/\D/g, ''))} />
+                        <span className={styles.alertInputHint}>Used to match alerts to this card</span>
+                      </div>
+                      {alertMsgs[acc.id] && (
+                        <div className={styles.alertMsg} style={{ color: alertMsgs[acc.id].startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>{alertMsgs[acc.id]}</div>
+                      )}
+                      <div className={styles.alertActions}>
+                        <button className={styles.alertBtnCancel} onClick={() => setOpenAlertId(null)} disabled={isPending}><X size={13} /> Cancel</button>
+                        <button className={styles.alertBtnSave} onClick={() => handleSaveAlert(acc.id)} disabled={isPending}><Check size={13} /> Save Profile</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
+          // ── STANDARD BANK / CASH / SAVINGS / INVESTMENT CARD ─────
           const isNegative = acc.balance < 0;
           const profile = getProfile(acc.id);
-          const form = alertForms[acc.id] || { emailSender: "", customSender: "", last4: "" };
+          const form = alertForms[acc.id] || { emailSender: '', customSender: '', last4: '' };
           const isAlertOpen = openAlertId === acc.id;
 
           return (
-            <div key={acc.id} className={`${styles.accountCard} ${isAlertOpen ? styles.accountCardExpanded : ""}`}>
+            <div key={acc.id} className={`${styles.accountCard} ${isAlertOpen ? styles.accountCardExpanded : ''}`}>
               <div className={styles.cardHeader}>
                 <div className={styles.cardIcon}>{getIcon(acc.type)}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <div className={`${styles.cardBadge} ${getBadgeClass(acc.type)}`}>
-                    {getBadgeText(acc.type)}
-                  </div>
-                  <button
-                    className={styles.editBtn}
-                    onClick={(e) => { e.stopPropagation(); setEditingAccount(acc); }}
-                    title="Edit Account"
-                  >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div className={`${styles.cardBadge} ${getBadgeClass(acc.type)}`}>{getBadgeText(acc.type)}</div>
+                  <button className={styles.editBtn} onClick={e => { e.stopPropagation(); setEditingAccount(acc); }} title="Edit Account">
                     <Pencil size={14} />
                   </button>
                 </div>
               </div>
 
-              <div className={`${styles.cardAmount} ${isNegative ? styles.negative : ""}`}>
+              <div className={`${styles.cardAmount} ${isNegative ? styles.negative : ''}`}>
                 {isNegative ? `− ${formatCurrency(acc.balance, true)}` : formatCurrency(acc.balance)}
               </div>
               <div className={styles.cardName}>{acc.name}</div>
 
-              <div className={styles.cardDivider}></div>
+              <div className={styles.cardDivider} />
 
-              {/* Dynamic stats */}
               <div className={styles.cardStats}>
-                {acc.type === "credit_card" ? (
-                  <>
-                    <div className={styles.statItem}>Spent: <span className={styles.statValue}>{formatCurrency(acc.balance, true)}</span></div>
-                    <div className={styles.statItem}>Limit: <span className={styles.statValue}>{formatCurrency(150000)}</span></div>
-                  </>
-                ) : (
-                  <>
-                    <div className={styles.statItem}>Type: <span className={styles.statValue}>{getBadgeText(acc.type)}</span></div>
-                    <div className={styles.statItem}>Balance: <span className={styles.statValue}>{formatCurrency(acc.balance)}</span></div>
-                  </>
-                )}
+                <div className={styles.statItem}>Type: <span className={styles.statValue}>{getBadgeText(acc.type)}</span></div>
+                <div className={styles.statItem}>Balance: <span className={styles.statValue}>{formatCurrency(acc.balance)}</span></div>
               </div>
 
-              {/* EMAIL ALERT PROFILE SECTION */}
               <div className={styles.alertSection}>
-                <button
-                  className={styles.alertToggle}
-                  onClick={() => toggleAlert(acc.id)}
-                >
+                <button className={styles.alertToggle} onClick={() => toggleAlert(acc.id)}>
                   <div className={styles.alertToggleLeft}>
                     <Mail size={14} />
                     <span>Email Alert Profile</span>
-                    {profile && (
-                      <span className={styles.alertConfigured}>Configured</span>
-                    )}
+                    {profile && <span className={styles.alertConfigured}>Configured</span>}
                   </div>
                   {isAlertOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                 </button>
 
                 {isAlertOpen && (
                   <div className={styles.alertPanel}>
-                    <p className={styles.alertHint}>
-                      Link this account to your bank's email alerts so transactions can be auto-detected.
-                    </p>
-
-                    {/* Bank sender picker */}
+                    <p className={styles.alertHint}>Link this account to your bank's email alerts so transactions can be auto-detected.</p>
                     <div className={styles.alertField}>
                       <label className={styles.alertLabel}>Bank Email Sender</label>
-                      <select
-                        className={styles.alertInput}
-                        value={form.emailSender}
-                        onChange={e => updateForm(acc.id, "emailSender", e.target.value)}
-                      >
+                      <select className={styles.alertInput} value={form.emailSender} onChange={e => updateForm(acc.id, 'emailSender', e.target.value)}>
                         <option value="">Select your bank…</option>
-                        {KNOWN_SENDERS.map(s => (
-                          <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
+                        {KNOWN_SENDERS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                       </select>
                     </div>
-
-                    {/* Custom sender input */}
-                    {form.emailSender === "__custom__" && (
+                    {form.emailSender === '__custom__' && (
                       <div className={styles.alertField}>
                         <label className={styles.alertLabel}>Custom Sender Email</label>
-                        <input
-                          type="email"
-                          className={styles.alertInput}
-                          placeholder="e.g. alerts@mybank.com"
-                          value={form.customSender}
-                          onChange={e => updateForm(acc.id, "customSender", e.target.value)}
-                        />
+                        <input type="email" className={styles.alertInput} placeholder="e.g. alerts@mybank.com" value={form.customSender} onChange={e => updateForm(acc.id, 'customSender', e.target.value)} />
                       </div>
                     )}
-
-                    {/* Last 4 digits */}
                     <div className={styles.alertField}>
                       <label className={styles.alertLabel}>Account Last 4 Digits</label>
-                      <input
-                        type="text"
-                        className={styles.alertInput}
-                        placeholder="e.g. 1234"
-                        maxLength={4}
-                        value={form.last4}
-                        onChange={e => updateForm(acc.id, "last4", e.target.value.replace(/\D/g, ""))}
-                      />
+                      <input type="text" className={styles.alertInput} placeholder="e.g. 1234" maxLength={4} value={form.last4} onChange={e => updateForm(acc.id, 'last4', e.target.value.replace(/\D/g, ''))} />
                       <span className={styles.alertInputHint}>Used to match SMS/email to this account</span>
                     </div>
-
-                    {/* Feedback */}
                     {alertMsgs[acc.id] && (
-                      <div className={styles.alertMsg} style={{
-                        color: alertMsgs[acc.id].startsWith("✓") ? "var(--success)" : "var(--danger)"
-                      }}>
-                        {alertMsgs[acc.id]}
-                      </div>
+                      <div className={styles.alertMsg} style={{ color: alertMsgs[acc.id].startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>{alertMsgs[acc.id]}</div>
                     )}
-
-                    {/* Actions */}
                     <div className={styles.alertActions}>
-                      <button
-                        className={styles.alertBtnCancel}
-                        onClick={() => setOpenAlertId(null)}
-                        disabled={isPending}
-                      >
-                        <X size={13} /> Cancel
-                      </button>
-                      <button
-                        className={styles.alertBtnSave}
-                        onClick={() => handleSaveAlert(acc.id)}
-                        disabled={isPending}
-                      >
-                        <Check size={13} /> Save Profile
-                      </button>
+                      <button className={styles.alertBtnCancel} onClick={() => setOpenAlertId(null)} disabled={isPending}><X size={13} /> Cancel</button>
+                      <button className={styles.alertBtnSave} onClick={() => handleSaveAlert(acc.id)} disabled={isPending}><Check size={13} /> Save Profile</button>
                     </div>
                   </div>
                 )}
               </div>
-
             </div>
           );
         })}

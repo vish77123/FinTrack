@@ -7,7 +7,7 @@
 
 export interface ParsedTransaction {
   amount: number;
-  type: "income" | "expense";
+  type: "income" | "expense" | "cc_payment";
   merchant: string;
   date: string; // ISO string
   last4: string; // last 4 digits of account/card
@@ -132,10 +132,50 @@ function extractDate(text: string): string | null {
 interface Pattern {
   name: string; // for debug logging
   regex: RegExp;
-  type: "income" | "expense";
+  type: "income" | "expense" | "cc_payment";
   amountGroup: number;
   confidence: number;
 }
+
+// ═══════════════════════════════════════════════════════════
+// CC PAYMENT PATTERNS — must run BEFORE generic credit patterns
+// to detect bill payments as a separate type (cc_payment)
+// ═══════════════════════════════════════════════════════════
+
+const CC_PAYMENT_PATTERNS: Pattern[] = [
+  {
+    name: "hdfc_cc_payment",
+    // 'Payment of Rs.5,000 received on HDFC Bank Credit Card XX1234'
+    regex: /[Pp]ayment\s+of\s+(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d{1,2})?)\s+received.*?(?:card|Card)/,
+    type: "cc_payment",
+    amountGroup: 1,
+    confidence: 0.95,
+  },
+  {
+    name: "icici_cc_payment",
+    // 'ICICI Bank Credit Card XX1234 Payment received Rs.5000'
+    regex: /[Cc]redit\s+[Cc]ard.*?[Pp]ayment\s+(?:received|processed)\s+(?:Rs\.?|INR|₹)\s*([\d,]+)/,
+    type: "cc_payment",
+    amountGroup: 1,
+    confidence: 0.93,
+  },
+  {
+    name: "amex_cc_payment",
+    // 'Your payment of Rs. 5,000 has been received'
+    regex: /[Yy]our\s+payment\s+of\s+(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d{1,2})?)\s+has\s+been\s+received/,
+    type: "cc_payment",
+    amountGroup: 1,
+    confidence: 0.95,
+  },
+  {
+    name: "generic_cc_payment",
+    // 'Payment received of Rs.5000' or 'Payment received Rs.5000'
+    regex: /[Pp]ayment\s+received\s+(?:of\s+)?(?:Rs\.?|INR|₹)\s*([\d,]+)/,
+    type: "cc_payment",
+    amountGroup: 1,
+    confidence: 0.85,
+  },
+];
 
 const PATTERNS: Pattern[] = [
   // ── DEBIT PATTERNS ──────────────────────────────────────
@@ -263,13 +303,18 @@ export const KNOWN_BANK_SENDERS = [
 export function parseTransactionText(text: string, emailDate?: string): ParsedTransaction | null {
   const cleanText = cleanEmailText(text);
 
-  for (const pattern of PATTERNS) {
+  // Run CC payment patterns FIRST — before generic credit patterns
+  // This ensures bank CC payment receipts are correctly typed as cc_payment
+  for (const pattern of [...CC_PAYMENT_PATTERNS, ...PATTERNS]) {
     const match = cleanText.match(pattern.regex);
     if (match) {
       const amount = parseAmount(match[pattern.amountGroup]);
       if (isNaN(amount) || amount <= 0) continue;
 
-      const merchant = extractMerchant(cleanText) || "Bank Transaction";
+      const isCCPayment = pattern.type === "cc_payment";
+      const merchant = isCCPayment
+        ? "Credit Card Payment"
+        : extractMerchant(cleanText) || "Bank Transaction";
       const last4 = extractLast4(cleanText);
       const parsedDate = extractDate(cleanText) || emailDate || new Date().toISOString();
 

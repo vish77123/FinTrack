@@ -16,6 +16,12 @@ interface EditAccountModalProps {
     name: string;
     type: string;
     balance: number;
+    // CC-specific optional fields
+    credit_limit?: number | null;
+    outstanding_balance?: number | null;
+    statement_day?: number | null;
+    due_day?: number | null;
+    min_payment_pct?: number | null;
   } | null;
 }
 
@@ -28,6 +34,15 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
   const [errorMsg, setErrorMsg] = useState("");
   const [isArchiveConfirmOpen, setIsArchiveConfirmOpen] = useState(false);
 
+  // Credit card specific fields
+  const [creditLimit, setCreditLimit] = useState("");
+  const [outstandingBalance, setOutstandingBalance] = useState("");
+  const [statementDay, setStatementDay] = useState("");
+  const [dueDay, setDueDay] = useState("");
+  const [minPaymentPct, setMinPaymentPct] = useState("5");
+
+  const isCreditCard = type === "credit_card";
+
   // Populate form when account changes
   useEffect(() => {
     if (account) {
@@ -35,6 +50,13 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
       setType(account.type);
       setBalance(account.balance.toString());
       setErrorMsg("");
+
+      // Populate CC fields
+      setCreditLimit(account.credit_limit != null ? String(account.credit_limit) : "");
+      setOutstandingBalance(account.outstanding_balance != null ? String(account.outstanding_balance) : "");
+      setStatementDay(account.statement_day != null ? String(account.statement_day) : "");
+      setDueDay(account.due_day != null ? String(account.due_day) : "");
+      setMinPaymentPct(account.min_payment_pct != null ? String(account.min_payment_pct) : "5");
     }
   }, [account]);
 
@@ -42,13 +64,25 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
     setErrorMsg("");
     if (!name) return setErrorMsg("Please enter an account name.");
     if (!account) return;
+    if (isCreditCard && (!creditLimit || parseFloat(creditLimit) <= 0)) {
+      return setErrorMsg("Please enter a valid credit limit.");
+    }
 
     setIsSubmitting(true);
 
     const formData = new FormData();
     formData.append("name", name);
     formData.append("type", type);
-    formData.append("balance", balance || "0");
+    formData.append("balance", isCreditCard ? "0" : (balance || "0"));
+
+    // CC fields
+    if (isCreditCard) {
+      formData.append("credit_limit", creditLimit);
+      formData.append("outstanding_balance", outstandingBalance || "0");
+      if (statementDay) formData.append("statement_day", statementDay);
+      if (dueDay) formData.append("due_day", dueDay);
+      formData.append("min_payment_pct", minPaymentPct || "5");
+    }
 
     const result = await updateAccountAction(account.id, formData);
 
@@ -151,14 +185,99 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
         </select>
       </div>
 
-      <div className={styles.formGroup} style={{ marginBottom: 0 }}>
-        <label className={styles.inputLabel}>Current Balance</label>
-        <CurrencyInput 
-          value={balance} 
-          onChange={setBalance} 
-          currency="₹" 
-        />
-      </div>
+      {/* Standard balance field — hidden for credit cards */}
+      {!isCreditCard && (
+        <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+          <label className={styles.inputLabel}>Current Balance</label>
+          <CurrencyInput 
+            value={balance} 
+            onChange={setBalance} 
+            currency="₹" 
+          />
+        </div>
+      )}
+
+      {/* Credit Card Settings section */}
+      {isCreditCard && (
+        <div style={{
+          marginTop: "8px",
+          paddingTop: "16px",
+          borderTop: "1px solid var(--border)",
+        }}>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            marginBottom: "16px",
+          }}>
+            <span style={{ fontSize: "16px" }}>💳</span>
+            <span style={{
+              fontSize: "12px",
+              fontWeight: 700,
+              textTransform: "uppercase" as const,
+              letterSpacing: "0.6px",
+              color: "var(--text-secondary)",
+            }}>
+              Credit Card Settings
+            </span>
+          </div>
+
+          {/* Credit Limit */}
+          <div className={styles.formGroup}>
+            <label className={styles.inputLabel}>Credit Limit <span style={{ color: "var(--danger)" }}>*</span></label>
+            <CurrencyInput value={creditLimit} onChange={setCreditLimit} currency="₹" />
+          </div>
+
+          {/* Current Outstanding */}
+          <div className={styles.formGroup}>
+            <label className={styles.inputLabel}>Current Outstanding</label>
+            <CurrencyInput value={outstandingBalance} onChange={setOutstandingBalance} currency="₹" />
+          </div>
+
+          {/* Statement Day + Due Day */}
+          <div style={{ display: "flex", gap: "12px" }}>
+            <div className={styles.formGroup} style={{ flex: 1 }}>
+              <label className={styles.inputLabel}>Statement Date <span style={{ color: "var(--text-tertiary)", fontWeight: 400, fontSize: "11px" }}>(1–28)</span></label>
+              <input
+                type="number"
+                min={1}
+                max={28}
+                placeholder="e.g. 15"
+                className={styles.formInput}
+                value={statementDay}
+                onChange={(e) => setStatementDay(e.target.value)}
+              />
+            </div>
+            <div className={styles.formGroup} style={{ flex: 1 }}>
+              <label className={styles.inputLabel}>Payment Due Date <span style={{ color: "var(--text-tertiary)", fontWeight: 400, fontSize: "11px" }}>(1–28)</span></label>
+              <input
+                type="number"
+                min={1}
+                max={28}
+                placeholder="e.g. 5"
+                className={styles.formInput}
+                value={dueDay}
+                onChange={(e) => setDueDay(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Min Payment % */}
+          <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+            <label className={styles.inputLabel}>Minimum Payment %</label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              step={0.5}
+              placeholder="5"
+              className={styles.formInput}
+              value={minPaymentPct}
+              onChange={(e) => setMinPaymentPct(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={isArchiveConfirmOpen}

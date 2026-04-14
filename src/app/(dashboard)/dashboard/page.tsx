@@ -3,7 +3,7 @@ import { getDashboardData } from "@/lib/data/dashboard";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import SummaryGrid from "@/components/dashboard/SummaryGrid";
 import PendingTray from "@/components/dashboard/PendingTray";
-import AccountCards from "@/components/dashboard/AccountCards";
+import { AccountCardsWithPayBill } from "@/components/dashboard/AccountCardsWithPayBill";
 import TransactionList from "@/components/dashboard/TransactionList";
 import SpendingChart from "@/components/dashboard/SpendingChart";
 import SavingsGoals from "@/components/dashboard/SavingsGoals";
@@ -38,6 +38,9 @@ export default async function DashboardPage() {
   ]);
   const { transactions: pendingTxns } = pendingResult;
 
+  // Filter out contact accounts from the visible accounts card strip
+  const visibleAccounts = dashboardData.accounts.filter((a: any) => a.type !== 'contact');
+
   return (
     <div>
       <DashboardHeader userName={userName} />
@@ -48,13 +51,19 @@ export default async function DashboardPage() {
         expenses={dashboardData.expenses}
         savings={dashboardData.savings}
         currency={dashboardData.currency}
+        totalCCDebt={(dashboardData as any).totalCCDebt ?? 0}
+        ccCardCount={(dashboardData as any).ccCardCount ?? 0}
       />
       
       <div style={{ marginTop: "24px", marginBottom: "24px" }}>
         <PendingTray items={pendingTxns as any} currency={dashboardData.currency} />
       </div>
       
-      <AccountCards accounts={dashboardData.accounts.filter((a: any) => a.type !== 'contact')} currency={dashboardData.currency} />
+      {/* AccountCardsWithPayBill is a client component that handles "Pay Bill" → modal prefill */}
+      <AccountCardsWithPayBill
+        accounts={visibleAccounts}
+        currency={dashboardData.currency}
+      />
       
       <div className={styles.contentGrid}>
         <TransactionList items={dashboardData.recentTransactions} currency={dashboardData.currency} />

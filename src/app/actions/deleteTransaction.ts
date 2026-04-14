@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { reverseBalanceUpdate } from "./transactions";
 
 export async function deleteTransactionAction(transactionId: string) {
   const supabase = await createClient();
@@ -40,72 +41,13 @@ export async function deleteTransactionAction(transactionId: string) {
     return { error: "Could not remove transaction. Try again." };
   }
 
-  // 3. Adjust the account balance at the application level
-  //    This ensures correct behavior regardless of whether the DB trigger executed.
-  //    Reversing the original transaction effect:
-  //    - Expense was: balance - amount → reverse: balance + amount
-  //    - Income was: balance + amount → reverse: balance - amount
-  //    - Transfer was: from balance - amount, to balance + amount → reverse both
-  const amount = Number(txn.amount);
-
-  if (txn.type === "expense") {
-    // Reverse expense: add back to account
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("balance")
-      .eq("id", txn.account_id)
-      .single();
-
-    if (account) {
-      await supabase
-        .from("accounts")
-        .update({ balance: Number(account.balance) + amount })
-        .eq("id", txn.account_id);
-    }
-  } else if (txn.type === "income") {
-    // Reverse income: subtract from account
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("balance")
-      .eq("id", txn.account_id)
-      .single();
-
-    if (account) {
-      await supabase
-        .from("accounts")
-        .update({ balance: Number(account.balance) - amount })
-        .eq("id", txn.account_id);
-    }
-  } else if (txn.type === "transfer") {
-    // Reverse transfer: add back to source, subtract from destination
-    const { data: fromAccount } = await supabase
-      .from("accounts")
-      .select("balance")
-      .eq("id", txn.account_id)
-      .single();
-
-    if (fromAccount) {
-      await supabase
-        .from("accounts")
-        .update({ balance: Number(fromAccount.balance) + amount })
-        .eq("id", txn.account_id);
-    }
-
-    if (txn.transfer_to_account_id) {
-      const { data: toAccount } = await supabase
-        .from("accounts")
-        .select("balance")
-        .eq("id", txn.transfer_to_account_id)
-        .single();
-
-      if (toAccount) {
-        await supabase
-          .from("accounts")
-          .update({ balance: Number(toAccount.balance) - amount })
-          .eq("id", txn.transfer_to_account_id);
-      }
-    }
-  }
+  // 3. Reverse balance using CC-aware logic
+  await reverseBalanceUpdate(supabase, {
+    type: txn.type,
+    amount: Number(txn.amount),
+    account_id: txn.account_id,
+    transfer_to_account_id: txn.transfer_to_account_id,
+  });
 
   // Once safely deleted and balance adjusted, clear the caches
   revalidatePath("/dashboard");
@@ -135,23 +77,14 @@ export async function deleteAllSplitSiblingsAction(splitGroupId: string) {
     return { error: "No split transactions found." };
   }
 
-  // Reverse balance effects for every sibling
+  // Reverse balance effects for every sibling (CC-aware)
   for (const txn of siblings) {
-    const amount = Number(txn.amount);
-    if (txn.type === "expense") {
-      const { data: acct } = await supabase.from("accounts").select("balance").eq("id", txn.account_id).single();
-      if (acct) await supabase.from("accounts").update({ balance: Number(acct.balance) + amount }).eq("id", txn.account_id);
-    } else if (txn.type === "income") {
-      const { data: acct } = await supabase.from("accounts").select("balance").eq("id", txn.account_id).single();
-      if (acct) await supabase.from("accounts").update({ balance: Number(acct.balance) - amount }).eq("id", txn.account_id);
-    } else if (txn.type === "transfer") {
-      const { data: from } = await supabase.from("accounts").select("balance").eq("id", txn.account_id).single();
-      if (from) await supabase.from("accounts").update({ balance: Number(from.balance) + amount }).eq("id", txn.account_id);
-      if (txn.transfer_to_account_id) {
-        const { data: to } = await supabase.from("accounts").select("balance").eq("id", txn.transfer_to_account_id).single();
-        if (to) await supabase.from("accounts").update({ balance: Number(to.balance) - amount }).eq("id", txn.transfer_to_account_id);
-      }
-    }
+    await reverseBalanceUpdate(supabase, {
+      type: txn.type,
+      amount: Number(txn.amount),
+      account_id: txn.account_id,
+      transfer_to_account_id: txn.transfer_to_account_id,
+    });
   }
 
   // Delete all sibling rows

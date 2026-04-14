@@ -15,6 +15,10 @@ interface AddTransactionModalProps {
   onClose: () => void;
   availableAccounts: any[];
   availableCategories?: any[];
+  prefillTransferTo?: string;   // "Pay Bill" shortcut — pre-selects CC as destination
+  prefillAmount?: number;        // "Pay Bill" shortcut — pre-fills current due amount
+  prefillNote?: string;          // "Pay Bill" shortcut — e.g. "AMEX bill payment"
+  prefillTab?: "income" | "expense" | "transfer"; // forces a specific tab on open
 }
 
 // Fallback categories — only used when the user has no categories in their DB yet
@@ -35,7 +39,7 @@ interface SplitRow {
   note: string;
 }
 
-export function AddTransactionModal({ isOpen, onClose, availableAccounts, availableCategories = [] }: AddTransactionModalProps) {
+export function AddTransactionModal({ isOpen, onClose, availableAccounts, availableCategories = [], prefillTransferTo, prefillAmount, prefillNote, prefillTab }: AddTransactionModalProps) {
   const router = useRouter();
   const { editingTransaction, setEditingTransaction } = useUIStore();
   const isEditing = !!editingTransaction;
@@ -50,12 +54,23 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
   const [type, setType] = useState<"income" | "expense" | "transfer">("expense");
   const [amount, setAmount] = useState("");
   const [accountId, setAccountId] = useState(availableAccounts[0]?.id || "");
-  const [toAccountId, setToAccountId] = useState("");
+  const [toAccountId, setToAccountId] = useState(prefillTransferTo || "");
   const [categoryId, setCategoryId] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [note, setNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  // CC context helpers
+  const selectedAccount = useMemo(() => availableAccounts.find(a => a.id === accountId), [availableAccounts, accountId]);
+  const selectedToAccount = useMemo(() => availableAccounts.find(a => a.id === toAccountId), [availableAccounts, toAccountId]);
+  const isSelectedAccountCC = selectedAccount?.type === 'credit_card';
+  const isToAccountCC = selectedToAccount?.type === 'credit_card';
+  const ccAvailableCredit = isSelectedAccountCC ? (selectedAccount?.availableCredit ?? null) : null;
+  const ccOutstanding = isToAccountCC ? (selectedToAccount?.outstanding_balance ?? null) : null;
+  const ccMinPayment = isToAccountCC ? (selectedToAccount?.minPaymentDue ?? null) : null;
+  const parsedAmount = parseFloat(amount || "0");
+  const exceedsCredit = ccAvailableCredit !== null && parsedAmount > 0 && parsedAmount > ccAvailableCredit;
 
   // Split mode state
   const [isSplitMode, setIsSplitMode] = useState(false);
@@ -109,7 +124,7 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
         ]);
       }
     } else {
-      // Reset to defaults when closing edit mode
+      // Reset to defaults when not editing
       setType("expense");
       setAmount("");
       setAccountId(availableAccounts[0]?.id || "");
@@ -122,9 +137,33 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
         { amount: "", destination: "", destinationLabel: "", note: "" }
       ]);
       setExpandedSplit(null);
+      // Apply Pay Bill prefills (only when not editing)
+      if (prefillTransferTo) {
+        setType("transfer");
+        setToAccountId(prefillTransferTo);
+        if (prefillAmount) setAmount(String(prefillAmount));
+        if (prefillNote) setNote(prefillNote);
+      } else if (prefillTab) {
+        setType(prefillTab);
+        setToAccountId("");
+      } else {
+        setToAccountId("");
+      }
     }
     setErrorMsg("");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingTransaction, availableAccounts]);
+
+  // Re-apply prefill whenever the Pay Bill props change (modal already mounted case)
+  useEffect(() => {
+    if (!editingTransaction && prefillTransferTo) {
+      setType("transfer");
+      setToAccountId(prefillTransferTo);
+      if (prefillAmount) setAmount(String(prefillAmount));
+      if (prefillNote) setNote(prefillNote);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillTransferTo, prefillAmount, prefillNote]);
 
   const handleClose = () => {
     setEditingTransaction(null);
@@ -366,7 +405,9 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
             </select>
           </div>
           <div className={styles.formGroup} style={{ flex: 1 }}>
-            <label className={styles.inputLabel}>To Account</label>
+            <label className={styles.inputLabel}>
+              {isToAccountCC ? "Pay Off Card" : "To Account"}
+            </label>
             <select
               className={`${styles.formInput} ${styles.formSelect}`}
               value={toAccountId}
@@ -375,16 +416,25 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
               <option value="" disabled>Select destination</option>
               {availableAccounts.map(acc => (
                 <option key={acc.id} value={acc.id}>
-                  {acc.type === 'contact' ? '👤 ' : ''}{acc.name}
+                  {acc.type === 'contact' ? '👤 ' : acc.type === 'credit_card' ? '💳 ' : ''}{acc.name}
                 </option>
               ))}
             </select>
+            {/* CC outstanding hint when paying off a card */}
+            {isToAccountCC && ccOutstanding !== null && (
+              <div style={{ marginTop: "6px", fontSize: "12px", color: "var(--text-secondary)", fontWeight: 500 }}>
+                Current outstanding: ₹{Number(ccOutstanding).toLocaleString("en-IN")}
+                {ccMinPayment ? ` · Min. ₹${Number(ccMinPayment).toLocaleString("en-IN")}` : ""}
+              </div>
+            )}
           </div>
         </div>
       ) : (
         <>
           <div className={styles.formGroup}>
-            <label className={styles.inputLabel}>Account</label>
+            <label className={styles.inputLabel}>
+              {isSelectedAccountCC ? "Charge to Card" : "Account"}
+            </label>
             <select
               className={`${styles.formInput} ${styles.formSelect}`}
               value={accountId}
@@ -392,7 +442,7 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
             >
               {bankAccounts.map(acc => (
                 <option key={acc.id} value={acc.id}>
-                  {acc.name} (₹{(acc.balance || 0).toLocaleString("en-IN")})
+                  {acc.type === 'credit_card' ? '💳 ' : ''}{acc.name}{acc.type !== 'credit_card' ? ` (₹${(acc.balance || 0).toLocaleString("en-IN")})` : ''}
                 </option>
               ))}
               {contactAccounts.length > 0 && (
@@ -405,6 +455,34 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
                 </optgroup>
               )}
             </select>
+            {/* CC available credit hint */}
+            {isSelectedAccountCC && ccAvailableCredit !== null && (
+              <div style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: exceedsCredit ? "var(--danger)" : "var(--text-secondary)",
+                fontWeight: 500,
+              }}>
+                {exceedsCredit
+                  ? `⚠️ Exceeds available credit of ₹${ccAvailableCredit.toLocaleString("en-IN")}`
+                  : `Available credit: ₹${ccAvailableCredit.toLocaleString("en-IN")}`
+                }
+              </div>
+            )}
+            {/* CC income restriction tooltip */}
+            {isSelectedAccountCC && type === "income" && (
+              <div style={{
+                marginTop: "6px",
+                padding: "8px 10px",
+                borderRadius: "8px",
+                background: "var(--warning-light)",
+                color: "var(--warning)",
+                fontSize: "12px",
+                fontWeight: 500,
+              }}>
+                💡 For cashback or refunds, record as a negative expense instead of income.
+              </div>
+            )}
           </div>
 
           {/* ===== SPLIT TOGGLE ===== */}

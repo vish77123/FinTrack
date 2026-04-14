@@ -374,13 +374,15 @@ export async function syncGmailAction() {
 
     // Save
     if (!approvalRequired) {
+      // cc_payment stored as transfer in main transactions
+      const insertType = parsed.type === "cc_payment" ? "transfer" : parsed.type;
       const { error: txnError } = await supabase
         .from("transactions")
         .insert({
           user_id: user.id,
           account_id: matchedAccountId,
           category_id: finalCategoryId,
-          type: parsed.type,
+          type: insertType,
           amount: parsed.amount,
           date: parsed.date,
           note: parsed.merchant,
@@ -391,17 +393,21 @@ export async function syncGmailAction() {
         if (matchedAccountId) {
           const { data: account } = await supabase
             .from("accounts")
-            .select("balance")
+            .select("type, balance, outstanding_balance")
             .eq("id", matchedAccountId)
             .single();
           if (account) {
-            const newBalance = parsed.type === "expense"
-              ? Number(account.balance) - parsed.amount
-              : Number(account.balance) + parsed.amount;
-            await supabase
-              .from("accounts")
-              .update({ balance: newBalance })
-              .eq("id", matchedAccountId);
+            if (account.type === "credit_card") {
+              // CC expense → increase outstanding; cc_payment → decrease outstanding
+              const delta = parsed.type === "expense" ? parsed.amount : -parsed.amount;
+              const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
+              await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", matchedAccountId);
+            } else {
+              const newBalance = parsed.type === "expense"
+                ? Number(account.balance) - parsed.amount
+                : Number(account.balance) + parsed.amount;
+              await supabase.from("accounts").update({ balance: newBalance }).eq("id", matchedAccountId);
+            }
           }
         }
         newCount++;
@@ -464,13 +470,17 @@ export async function approvePendingAction(pendingId: string) {
 
   if (!pending) return { error: "Transaction not found." };
 
+  const isCCPayment = pending.type === "cc_payment";
+  // cc_payment is stored as 'transfer' in the main transactions table
+  const insertType = isCCPayment ? "transfer" : pending.type;
+
   const { error: txnError } = await supabase
     .from("transactions")
     .insert({
       user_id: user.id,
       account_id: pending.account_id,
       category_id: pending.category_id,
-      type: pending.type,
+      type: insertType,
       amount: pending.amount,
       date: pending.date,
       note: pending.note,
@@ -482,17 +492,27 @@ export async function approvePendingAction(pendingId: string) {
   if (pending.account_id) {
     const { data: account } = await supabase
       .from("accounts")
-      .select("balance")
+      .select("type, balance, outstanding_balance")
       .eq("id", pending.account_id)
       .single();
     if (account) {
-      const newBalance = pending.type === "expense"
-        ? Number(account.balance) - Number(pending.amount)
-        : Number(account.balance) + Number(pending.amount);
-      await supabase
-        .from("accounts")
-        .update({ balance: newBalance })
-        .eq("id", pending.account_id);
+      if (account.type === "credit_card") {
+        // CC expense → more debt; cc_payment → reduce debt
+        const delta = (pending.type === "expense") ? Number(pending.amount) : -Number(pending.amount);
+        const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
+        await supabase
+          .from("accounts")
+          .update({ outstanding_balance: newOutstanding })
+          .eq("id", pending.account_id);
+      } else {
+        const newBalance = pending.type === "expense"
+          ? Number(account.balance) - Number(pending.amount)
+          : Number(account.balance) + Number(pending.amount);
+        await supabase
+          .from("accounts")
+          .update({ balance: newBalance })
+          .eq("id", pending.account_id);
+      }
     }
   }
 
@@ -537,13 +557,16 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
   if (!pendingTxns || pendingTxns.length === 0) return { error: "Transactions not found." };
 
   for (const pending of pendingTxns) {
+    const isCCPayment = pending.type === "cc_payment";
+    const insertType = isCCPayment ? "transfer" : pending.type;
+
     const { error: txnError } = await supabase
       .from("transactions")
       .insert({
         user_id: user.id,
         account_id: pending.account_id,
         category_id: pending.category_id,
-        type: pending.type,
+        type: insertType,
         amount: pending.amount,
         date: pending.date,
         note: pending.note,
@@ -553,17 +576,20 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
     if (!txnError && pending.account_id) {
       const { data: account } = await supabase
         .from("accounts")
-        .select("balance")
+        .select("type, balance, outstanding_balance")
         .eq("id", pending.account_id)
         .single();
       if (account) {
-        const newBalance = pending.type === "expense"
-          ? Number(account.balance) - Number(pending.amount)
-          : Number(account.balance) + Number(pending.amount);
-        await supabase
-          .from("accounts")
-          .update({ balance: newBalance })
-          .eq("id", pending.account_id);
+        if (account.type === "credit_card") {
+          const delta = (pending.type === "expense") ? Number(pending.amount) : -Number(pending.amount);
+          const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
+          await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", pending.account_id);
+        } else {
+          const newBalance = pending.type === "expense"
+            ? Number(account.balance) - Number(pending.amount)
+            : Number(account.balance) + Number(pending.amount);
+          await supabase.from("accounts").update({ balance: newBalance }).eq("id", pending.account_id);
+        }
       }
     }
   }
