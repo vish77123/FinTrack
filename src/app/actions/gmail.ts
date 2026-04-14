@@ -521,6 +521,81 @@ export async function discardPendingAction(pendingId: string) {
   return { success: true };
 }
 
+export async function approvePendingBulkAction(pendingIds: string[]) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Unauthorized" };
+
+  if (!pendingIds || pendingIds.length === 0) return { success: true };
+
+  const { data: pendingTxns } = await supabase
+    .from("pending_transactions")
+    .select("*")
+    .in("id", pendingIds)
+    .eq("user_id", user.id);
+
+  if (!pendingTxns || pendingTxns.length === 0) return { error: "Transactions not found." };
+
+  for (const pending of pendingTxns) {
+    const { error: txnError } = await supabase
+      .from("transactions")
+      .insert({
+        user_id: user.id,
+        account_id: pending.account_id,
+        category_id: pending.category_id,
+        type: pending.type,
+        amount: pending.amount,
+        date: pending.date,
+        note: pending.note,
+        source_email_id: pending.source_email_id,
+      });
+
+    if (!txnError && pending.account_id) {
+      const { data: account } = await supabase
+        .from("accounts")
+        .select("balance")
+        .eq("id", pending.account_id)
+        .single();
+      if (account) {
+        const newBalance = pending.type === "expense"
+          ? Number(account.balance) - Number(pending.amount)
+          : Number(account.balance) + Number(pending.amount);
+        await supabase
+          .from("accounts")
+          .update({ balance: newBalance })
+          .eq("id", pending.account_id);
+      }
+    }
+  }
+
+  await supabase
+    .from("pending_transactions")
+    .delete()
+    .in("id", pendingIds)
+    .eq("user_id", user.id);
+
+  revalidatePath("/dashboard");
+  revalidatePath("/transactions");
+  return { success: true };
+}
+
+export async function discardPendingBulkAction(pendingIds: string[]) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Unauthorized" };
+
+  if (!pendingIds || pendingIds.length === 0) return { success: true };
+
+  await supabase
+    .from("pending_transactions")
+    .delete()
+    .in("id", pendingIds)
+    .eq("user_id", user.id);
+
+  revalidatePath("/dashboard");
+  return { success: true };
+}
+
 export async function getGmailStatusAction() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

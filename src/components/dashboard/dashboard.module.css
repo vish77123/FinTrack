@@ -125,10 +125,41 @@
 .pendingTrayHeader {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
   margin-bottom: 16px;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
   color: var(--warning);
+}
+
+.checkboxWrapperTray {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  margin-right: 4px;
+  transition: color 0.15s;
+}
+
+.checkboxWrapperTray:hover {
+  color: var(--text-primary);
+}
+
+.checkboxWrapperTray.inWarning {
+  color: var(--warning);
+  margin-right: 0px;
+}
+
+.bulkActionsTray {
+  display: flex;
+  gap: 8px;
 }
 
 .pendingItem {
@@ -139,10 +170,18 @@
   border-radius: var(--radius-sm);
   margin-bottom: 8px;
   box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  border: 1px solid transparent;
 }
 
 .pendingItem:last-child {
   margin-bottom: 0;
+}
+
+.pendingItemSelected {
+  background: rgba(var(--accent-rgb, 0, 112, 243), 0.04);
+  border-color: rgba(var(--accent-rgb, 0, 112, 243), 0.3);
 }
 
 .txnIcon {

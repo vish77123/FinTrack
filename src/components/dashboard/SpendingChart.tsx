@@ -8,6 +8,12 @@ interface SpendingChartProps {
 }
 
 export default function SpendingChart({ data }: SpendingChartProps) {
+  const total = data.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+
+  const getPercentage = (value: number) => {
+    if (total === 0) return 0;
+    return parseFloat(((Number(value) / total) * 100).toFixed(1));
+  };
 
   return (
     <div className={styles.chartCard}>
@@ -31,7 +37,7 @@ export default function SpendingChart({ data }: SpendingChartProps) {
                 ))}
               </Pie>
               <Tooltip 
-                formatter={(value: any) => [`${value}%`, 'Share']}
+                formatter={(value: any) => [`${getPercentage(value)}%`, 'Share']}
                 contentStyle={{ borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}
                 itemStyle={{ color: 'var(--text-primary)' }}
               />
@@ -49,7 +55,7 @@ export default function SpendingChart({ data }: SpendingChartProps) {
                 />
                 {item.name}
               </div>
-              <div className={styles.legendValue}>{item.value}%</div>
+              <div className={styles.legendValue}>{getPercentage(item.value)}%</div>
             </div>
           ))}
         </div>
