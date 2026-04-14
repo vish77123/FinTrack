@@ -105,3 +105,32 @@ export async function updateAccountAction(accountId: string, formData: FormData)
 
   return { success: true };
 }
+
+export async function archiveAccountAction(accountId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "You must be logged in to do this." };
+  }
+
+  if (!accountId) {
+    return { error: "Invalid account ID." };
+  }
+
+  const { error: dbError } = await supabase
+    .from("accounts")
+    .update({ is_archived: true })
+    .eq("id", accountId)
+    .eq("user_id", user.id);
+
+  if (dbError) {
+    console.error("Database Archive Error:", dbError);
+    return { error: "Failed to archive account. Please try again." };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/accounts");
+
+  return { success: true };
+}

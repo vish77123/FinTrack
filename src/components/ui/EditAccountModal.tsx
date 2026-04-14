@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { BaseModal } from "./BaseModal";
 import { CurrencyInput } from "./CurrencyInput";
-import { updateAccountAction } from "@/app/actions/accounts";
+import { updateAccountAction, archiveAccountAction } from "@/app/actions/accounts";
+import { ConfirmDialog } from "./ConfirmDialog";
 import styles from "./ui.module.css";
 
 interface EditAccountModalProps {
@@ -25,6 +26,7 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
   const [balance, setBalance] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [isArchiveConfirmOpen, setIsArchiveConfirmOpen] = useState(false);
 
   // Populate form when account changes
   useEffect(() => {
@@ -60,24 +62,53 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
     }
   };
 
+  const handleArchive = async () => {
+    if (!account) return;
+    setIsSubmitting(true);
+    const result = await archiveAccountAction(account.id);
+    if (result.error) {
+      setErrorMsg(result.error);
+      setIsSubmitting(false);
+      setIsArchiveConfirmOpen(false);
+    } else {
+      setIsSubmitting(false);
+      setIsArchiveConfirmOpen(false);
+      onClose();
+      router.refresh();
+    }
+  };
+
   const footer = (
-    <>
+    <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
       <button 
         className="btn" 
-        style={{ background: "transparent", color: "var(--text-secondary)", border: "none" }} 
-        onClick={onClose}
+        style={{ color: "var(--danger)", border: "none", background: "transparent" }}
+        onClick={() => setIsArchiveConfirmOpen(true)}
         disabled={isSubmitting}
+        type="button"
       >
-        Cancel
+        Archive Account
       </button>
-      <button 
-        className="btn btn-primary" 
-        onClick={handleSubmit}
-        disabled={isSubmitting}
-      >
-        {isSubmitting ? "Saving..." : "Save Changes"}
-      </button>
-    </>
+      <div style={{ display: "flex", gap: "12px" }}>
+        <button 
+          className="btn" 
+          style={{ background: "transparent", color: "var(--text-secondary)", border: "none" }} 
+          onClick={onClose}
+          disabled={isSubmitting}
+          type="button"
+        >
+          Cancel
+        </button>
+        <button 
+          className="btn btn-primary" 
+          onClick={handleSubmit}
+          disabled={isSubmitting}
+          type="button"
+        >
+          {isSubmitting ? "Saving..." : "Save Changes"}
+        </button>
+      </div>
+    </div>
   );
 
   return (
@@ -128,6 +159,17 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
           currency="₹" 
         />
       </div>
+
+      <ConfirmDialog
+        isOpen={isArchiveConfirmOpen}
+        onConfirm={handleArchive}
+        onCancel={() => setIsArchiveConfirmOpen(false)}
+        title="Archive Account"
+        message={`Are you sure you want to archive "${account?.name}"? You can't add new transactions to it, but its history will be kept.`}
+        confirmText="Archive"
+        variant="danger"
+        isPending={isSubmitting}
+      />
     </BaseModal>
   );
 }
