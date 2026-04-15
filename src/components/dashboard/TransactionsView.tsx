@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Plus, Search, Calendar, Trash2, Pencil, ChevronDown, ChevronUp } from "lucide-react";
+import { Download, Plus, Search, Trash2, Pencil, ChevronDown, ChevronUp, SlidersHorizontal, X } from "lucide-react";
 import styles from "./transactions.module.css";
 import { useUIStore } from "@/store/useUIStore";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -33,6 +33,9 @@ export default function TransactionsView({ transactions, currency, categories = 
   const [deletingName, setDeletingName] = useState("");
   const [deletingIsSplitGroup, setDeletingIsSplitGroup] = useState(false);
 
+  // Mobile filter sheet
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+
   // Split expand state
   const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set());
 
@@ -46,6 +49,24 @@ export default function TransactionsView({ transactions, currency, categories = 
       }
       return next;
     });
+  };
+
+  // Active filter count for badge
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (typeFilter !== "all") count++;
+    if (categoryFilter !== "all") count++;
+    if (accountFilter !== "all") count++;
+    if (dateFilter !== "all") count++;
+    return count;
+  }, [typeFilter, categoryFilter, accountFilter, dateFilter]);
+
+  const resetAllFilters = () => {
+    setTypeFilter("all");
+    setCategoryFilter("all");
+    setAccountFilter("all");
+    setDateFilter("all");
+    setCustomDateRange({ start: "", end: "" });
   };
 
   const formatCurrency = (amount: number, type: string) => {
@@ -306,7 +327,8 @@ export default function TransactionsView({ transactions, currency, categories = 
       </div>
 
       {/* FILTER BAR SECTION */}
-      <div className={styles.filterRow}>
+      {/* Desktop: full inline filter row */}
+      <div className={`${styles.filterRow} ${styles.desktopFilters}`}>
         <div className={styles.segmentedToggle}>
           <button className={`${styles.toggleBtn} ${typeFilter === "all" ? styles.active : ""}`} onClick={() => setTypeFilter("all")}>All</button>
           <button className={`${styles.toggleBtn} ${typeFilter === "income" ? styles.active : ""}`} onClick={() => setTypeFilter("income")}>Income</button>
@@ -367,6 +389,127 @@ export default function TransactionsView({ transactions, currency, categories = 
           </select>
         </div>
       </div>
+
+      {/* Mobile: compact filter trigger bar */}
+      <div className={styles.mobileFilterBar}>
+        <button
+          className={`${styles.mobileFilterBtn} ${activeFilterCount > 0 ? styles.mobileFilterBtnActive : ""}`}
+          onClick={() => setMobileFiltersOpen(true)}
+        >
+          <SlidersHorizontal size={15} />
+          Filters
+          {activeFilterCount > 0 && (
+            <span className={styles.filterBadge}>{activeFilterCount}</span>
+          )}
+        </button>
+
+        {/* Active filter chips */}
+        {typeFilter !== "all" && (
+          <span className={styles.filterChip}>
+            {typeFilter.charAt(0).toUpperCase() + typeFilter.slice(1)}
+            <button className={styles.chipRemove} onClick={() => setTypeFilter("all")}><X size={11} /></button>
+          </span>
+        )}
+        {dateFilter !== "all" && (
+          <span className={styles.filterChip}>
+            {dateFilter === "today" ? "Today" : dateFilter === "week" ? "This Week" : dateFilter === "month" ? "This Month" : "Custom"}
+            <button className={styles.chipRemove} onClick={() => { setDateFilter("all"); setCustomDateRange({ start: "", end: "" }); }}><X size={11} /></button>
+          </span>
+        )}
+        {categoryFilter !== "all" && (
+          <span className={styles.filterChip}>
+            {categoryFilter}
+            <button className={styles.chipRemove} onClick={() => setCategoryFilter("all")}><X size={11} /></button>
+          </span>
+        )}
+        {accountFilter !== "all" && (
+          <span className={styles.filterChip}>
+            {accountFilter}
+            <button className={styles.chipRemove} onClick={() => setAccountFilter("all")}><X size={11} /></button>
+          </span>
+        )}
+      </div>
+
+      {/* Mobile filter bottom sheet */}
+      {mobileFiltersOpen && (
+        <div className={styles.mobileSheetOverlay} onClick={() => setMobileFiltersOpen(false)}>
+          <div className={styles.mobileSheet} onClick={e => e.stopPropagation()}>
+            <div className={styles.sheetHandle} />
+            <div className={styles.sheetHeader}>
+              <span className={styles.sheetTitle}>Filters</span>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {activeFilterCount > 0 && (
+                  <button className={styles.sheetResetBtn} onClick={resetAllFilters}>Reset all</button>
+                )}
+                <button className={styles.sheetCloseBtn} onClick={() => setMobileFiltersOpen(false)}><X size={18} /></button>
+              </div>
+            </div>
+
+            <div className={styles.sheetBody}>
+              {/* Type */}
+              <div className={styles.sheetSection}>
+                <div className={styles.sheetSectionLabel}>Type</div>
+                <div className={styles.sheetSegmented}>
+                  {["all", "income", "expense", "transfers"].map(t => (
+                    <button
+                      key={t}
+                      className={`${styles.sheetToggleBtn} ${typeFilter === t ? styles.sheetToggleActive : ""}`}
+                      onClick={() => setTypeFilter(t)}
+                    >
+                      {t === "all" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Date */}
+              <div className={styles.sheetSection}>
+                <div className={styles.sheetSectionLabel}>Date Range</div>
+                <div className={styles.sheetSegmented} style={{ flexWrap: "wrap" }}>
+                  {[{v:"all",l:"All Time"},{v:"today",l:"Today"},{v:"week",l:"This Week"},{v:"month",l:"This Month"},{v:"custom",l:"Custom"}].map(({v,l}) => (
+                    <button
+                      key={v}
+                      className={`${styles.sheetToggleBtn} ${dateFilter === v ? styles.sheetToggleActive : ""}`}
+                      onClick={() => setDateFilter(v)}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                {dateFilter === "custom" && (
+                  <div className={styles.sheetDateRange}>
+                    <input type="date" className={styles.sheetDateInput} value={customDateRange.start} onChange={e => setCustomDateRange(p => ({ ...p, start: e.target.value }))} />
+                    <span className={styles.dateSeparator}>—</span>
+                    <input type="date" className={styles.sheetDateInput} value={customDateRange.end} onChange={e => setCustomDateRange(p => ({ ...p, end: e.target.value }))} />
+                  </div>
+                )}
+              </div>
+
+              {/* Category */}
+              <div className={styles.sheetSection}>
+                <div className={styles.sheetSectionLabel}>Category</div>
+                <select className={styles.sheetSelect} value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
+                  <option value="all">All Categories</option>
+                  {uniqueCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                </select>
+              </div>
+
+              {/* Account */}
+              <div className={styles.sheetSection}>
+                <div className={styles.sheetSectionLabel}>Account</div>
+                <select className={styles.sheetSelect} value={accountFilter} onChange={e => setAccountFilter(e.target.value)}>
+                  <option value="all">All Accounts</option>
+                  {uniqueAccounts.map(acc => <option key={acc} value={acc}>{acc}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className={styles.sheetFooter}>
+              <button className={styles.sheetApplyBtn} onClick={() => setMobileFiltersOpen(false)}>Show Results</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* DETAILED LIST VIEW */}
       <div className={styles.transactionsContainer}>
