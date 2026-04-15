@@ -5,8 +5,24 @@ import { useRouter } from "next/navigation";
 import { BaseModal } from "./BaseModal";
 import { CurrencyInput } from "./CurrencyInput";
 import { updateAccountAction, archiveAccountAction } from "@/app/actions/accounts";
+import { saveAlertProfileAction } from "@/app/actions/gmail";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { Mail, Check } from "lucide-react";
 import styles from "./ui.module.css";
+
+const KNOWN_SENDERS = [
+  { label: "HDFC Bank", value: "alerts@hdfcbank.net" },
+  { label: "HDFC Credit Card", value: "creditcardalerts@hdfcbank.com" },
+  { label: "SBI", value: "alerts@sbi.co.in" },
+  { label: "ICICI Bank", value: "alerts@icicibank.com" },
+  { label: "Axis Bank", value: "alerts@axisbank.com" },
+  { label: "Kotak Bank", value: "alerts.service@kotak.com" },
+  { label: "Yes Bank", value: "alerts@yesbank.in" },
+  { label: "PNB", value: "alerts@pnb.co.in" },
+  { label: "Paytm Bank", value: "noreply@paytmbank.com" },
+  { label: "IndusInd Bank", value: "alerts@indusind.com" },
+  { label: "Custom...", value: "__custom__" },
+];
 
 interface EditAccountModalProps {
   isOpen: boolean;
@@ -23,9 +39,10 @@ interface EditAccountModalProps {
     due_day?: number | null;
     min_payment_pct?: number | null;
   } | null;
+  alertProfile?: any;
 }
 
-export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalProps) {
+export function EditAccountModal({ isOpen, onClose, account, alertProfile }: EditAccountModalProps) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [type, setType] = useState("bank");
@@ -41,7 +58,14 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
   const [dueDay, setDueDay] = useState("");
   const [minPaymentPct, setMinPaymentPct] = useState("5");
 
+  // Email Alert specific fields
+  const [emailSender, setEmailSender] = useState("");
+  const [customSender, setCustomSender] = useState("");
+  const [last4, setLast4] = useState("");
+  const [isAlertConfigured, setIsAlertConfigured] = useState(false);
+
   const isCreditCard = type === "credit_card";
+  const isContact = type === "contact";
 
   // Populate form when account changes
   useEffect(() => {
@@ -57,8 +81,22 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
       setStatementDay(account.statement_day != null ? String(account.statement_day) : "");
       setDueDay(account.due_day != null ? String(account.due_day) : "");
       setMinPaymentPct(account.min_payment_pct != null ? String(account.min_payment_pct) : "5");
+
+      // Populate Alert fields
+      if (alertProfile) {
+        setIsAlertConfigured(true);
+        const isCustom = !KNOWN_SENDERS.some(s => s.value === alertProfile.email_sender_filter && s.value !== "__custom__");
+        setEmailSender(isCustom && alertProfile.email_sender_filter ? "__custom__" : (alertProfile.email_sender_filter || ""));
+        setCustomSender(isCustom ? (alertProfile.email_sender_filter || "") : "");
+        setLast4(alertProfile.account_last4 || "");
+      } else {
+        setIsAlertConfigured(false);
+        setEmailSender("");
+        setCustomSender("");
+        setLast4("");
+      }
     }
-  }, [account]);
+  }, [account, alertProfile]);
 
   const handleSubmit = async () => {
     setErrorMsg("");
@@ -89,11 +127,27 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
     if (result.error) {
       setErrorMsg(result.error);
       setIsSubmitting(false);
-    } else {
-      setIsSubmitting(false);
-      onClose();
-      router.refresh();
+      return;
     }
+
+    // Save Email Profile if set and not a contact
+    if (!isContact && emailSender) {
+      const effectiveSender = emailSender === "__custom__" ? customSender : emailSender;
+      const fd = new FormData();
+      fd.append("account_id", account.id);
+      fd.append("email_sender_filter", effectiveSender);
+      fd.append("account_last4", last4);
+      const alertResult = await saveAlertProfileAction(fd);
+      if (alertResult.error) {
+        setErrorMsg(`Account saved, but Alert Profile error: ${alertResult.error}`);
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    setIsSubmitting(false);
+    onClose();
+    router.refresh();
   };
 
   const handleArchive = async () => {
@@ -276,6 +330,66 @@ export function EditAccountModal({ isOpen, onClose, account }: EditAccountModalP
               onChange={(e) => setMinPaymentPct(e.target.value)}
             />
           </div>
+        </div>
+      )}
+
+      {/* Email Alert Settings section */}
+      {!isContact && (
+        <div style={{
+          marginTop: "8px",
+          paddingTop: "16px",
+          borderTop: "1px solid var(--border)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Mail size={16} />
+              <span style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", color: "var(--text-secondary)" }}>
+                Email Parsing Setup
+              </span>
+            </div>
+            {isAlertConfigured && <span style={{ background: "var(--success-light)", color: "var(--success)", fontSize: "11px", fontWeight: 600, padding: "2px 8px", borderRadius: "10px" }}>Configured</span>}
+          </div>
+          <p style={{ fontSize: "12px", color: "var(--text-tertiary)", marginBottom: "16px", lineHeight: 1.5 }}>Link this account to your bank's email alerts so transactions can be auto-detected.</p>
+          
+          <div className={styles.formGroup}>
+            <label className={styles.inputLabel}>Bank Email Sender</label>
+            <select 
+              className={`${styles.formInput} ${styles.formSelect}`}
+              value={emailSender}
+              onChange={(e) => setEmailSender(e.target.value)}
+            >
+              <option value="">None (Disable Parsing)</option>
+              {KNOWN_SENDERS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+
+          {emailSender === '__custom__' && (
+            <div className={styles.formGroup}>
+              <label className={styles.inputLabel}>Custom Sender Email</label>
+              <input 
+                type="email" 
+                placeholder="e.g. alerts@mybank.com"
+                className={styles.formInput}
+                value={customSender}
+                onChange={(e) => setCustomSender(e.target.value)}
+              />
+            </div>
+          )}
+
+          {emailSender !== "" && (
+            <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+              <label className={styles.inputLabel}>Account Last 4 Digits</label>
+              <input 
+                type="text" 
+                placeholder="e.g. 1234"
+                maxLength={4}
+                className={styles.formInput}
+                value={last4}
+                onChange={(e) => setLast4(e.target.value.replace(/\D/g, ''))}
+              />
+              <span style={{ display: "block", fontSize: "11px", color: "var(--text-tertiary)", marginTop: "4px" }}>Used to match SMS/email to this specific account</span>
+            </div>
+          )}
         </div>
       )}
 

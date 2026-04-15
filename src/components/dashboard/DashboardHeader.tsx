@@ -25,9 +25,9 @@ export default function DashboardHeader({ userName }: DashboardHeaderProps) {
   // Compute greeting and month only on the client to avoid SSR/client mismatch
   const greeting = mounted ? (() => {
     const hour = new Date().getHours();
-    if (hour < 12) return "Good morning";
-    if (hour < 18) return "Good afternoon";
-    return "Good evening";
+    if (hour < 12) return "🌅 Good morning";
+    if (hour < 18) return "☀️ Good afternoon";
+    return "🌙 Good evening";
   })() : "Hello";
 
   const monthYear = mounted
