@@ -256,7 +256,8 @@ export async function getDashboardData() {
           transfer_account_type: txn.transfer_account ? (txn.transfer_account as any).type : null,
           icon: txn.categories?.icon,
           color: txn.categories?.color,
-          split_group_id: txn.split_group_id
+          split_group_id: txn.split_group_id,
+          original_synced_name: txn.original_synced_name
         });
       });
 
@@ -352,7 +353,7 @@ export async function getReportsData() {
   const { data: txns } = await supabase
     .from("transactions")
     .select(`
-      id, amount, type, date, note, account_id, category_id, transfer_to_account_id, split_group_id,
+      id, amount, type, date, note, account_id, category_id, transfer_to_account_id, split_group_id, original_synced_name,
       categories(name, color, icon),
       accounts!transactions_account_id_fkey(name, type),
       transfer_account:accounts!transactions_transfer_to_account_id_fkey(name, type)
@@ -376,7 +377,8 @@ export async function getReportsData() {
     transfer_account_type: txn.transfer_account ? (txn.transfer_account as any).type : null,
     icon: (txn.categories as any)?.icon,
     color: (txn.categories as any)?.color,
-    split_group_id: txn.split_group_id
+    split_group_id: txn.split_group_id,
+    original_synced_name: txn.original_synced_name
   }));
 
   return { transactions, currency: "₹" };

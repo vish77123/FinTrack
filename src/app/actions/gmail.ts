@@ -103,6 +103,12 @@ export async function syncGmailAction() {
 
   const historicalMappings = history || [];
 
+  const { data: rules } = await supabase
+    .from("merchant_rules")
+    .select("*")
+    .eq("user_id", user.id);
+  const merchantRules = rules || [];
+
   // Fetch bank alert emails from Gmail (last 3 days)
   const threeDaysAgo = Math.floor((Date.now() - 3 * 86400000) / 1000);
   const query = `(from:alerts OR from:noreply OR subject:transaction OR subject:debited OR subject:credited) after:${threeDaysAgo}`;
@@ -315,10 +321,25 @@ export async function syncGmailAction() {
       continue;
     }
 
+    const originalMerchantName = parsed.merchant;
+    let ruleMatched = false;
+
+    // Apply auto-categorization Merchant Rules first
+    if (merchantRules.length > 0) {
+      const match = merchantRules.find((r: any) => r.synced_name.toLowerCase() === originalMerchantName.toLowerCase());
+      if (match) {
+        parsed.merchant = match.renamed_to;
+        if (match.category_id) {
+          finalCategoryId = match.category_id;
+        }
+        ruleMatched = true;
+      }
+    }
+
     // 1. FIRST PRIORITY: LOCAL HISTORICAL MATCH
     // If we have a local matching merchant from history, IT OVERRIDES everything else!
     let localMatchedCategory: string | null = null;
-    if (historicalMappings.length > 0) {
+    if (!ruleMatched && historicalMappings.length > 0) {
       const merchantLower = parsed.merchant.toLowerCase();
       let match = historicalMappings.find(h => h.note?.toLowerCase() === merchantLower);
       if (!match) {
@@ -387,6 +408,7 @@ export async function syncGmailAction() {
           date: parsed.date,
           note: parsed.merchant,
           source_email_id: email.msgId,
+          original_synced_name: originalMerchantName,
         });
 
       if (!txnError) {
@@ -424,6 +446,7 @@ export async function syncGmailAction() {
           date: parsed.date,
           note: parsed.merchant,
           source_email_id: email.msgId,
+          original_synced_name: originalMerchantName,
           confidence: parsed.confidence,
           status: "pending",
           raw_snippet: parsed.rawSnippet || email.fullText.slice(0, 200),
@@ -485,6 +508,7 @@ export async function approvePendingAction(pendingId: string) {
       date: pending.date,
       note: pending.note,
       source_email_id: pending.source_email_id,
+      original_synced_name: pending.original_synced_name,
     });
 
   if (txnError) return { error: "Failed to save transaction." };
@@ -571,6 +595,7 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
         date: pending.date,
         note: pending.note,
         source_email_id: pending.source_email_id,
+        original_synced_name: pending.original_synced_name,
       });
 
     if (!txnError && pending.account_id) {

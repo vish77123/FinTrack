@@ -22,6 +22,10 @@ import {
   getGmailStatusAction,
   updateEmailSyncSettingsAction
 } from "@/app/actions/gmail";
+import { 
+  getMerchantRulesAction, 
+  deleteMerchantRuleAction 
+} from "@/app/actions/merchantRulesActions";
 
 const CURRENCIES = [
   { code: "INR", symbol: "₹", label: "Indian Rupee (₹)" },
@@ -319,6 +323,14 @@ export function SettingsClient() {
                 </div>
               </div>
 
+            </div>
+          </div>
+
+          {/* AUTO-CATEGORIZATION RULES SECTION */}
+          <div className={styles.settingsSection}>
+            <div className={styles.sectionTitle}>AUTO-CATEGORIZATION</div>
+            <div className={styles.listBlock}>
+              <MerchantRulesPanel isPending={isPending} startTransition={startTransition} />
             </div>
           </div>
         </div>
@@ -732,5 +744,94 @@ function AIConfigPanel({
         </div>
       )}
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// MerchantRulesPanel — Isolated sub-component
+// ═══════════════════════════════════════════════════════════
+
+function MerchantRulesPanel({ 
+  isPending, startTransition 
+}: {
+  isPending: boolean;
+  startTransition: (fn: () => Promise<void>) => void;
+}) {
+  const [rules, setRules] = useState<any[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && !loaded) {
+      getMerchantRulesAction().then((res) => {
+        setRules(res.rules || []);
+        setLoaded(true);
+      });
+    }
+  }, [isOpen, loaded]);
+
+  const handleDelete = (id: string) => {
+    startTransition(async () => {
+      await deleteMerchantRuleAction(id);
+      setRules(rules.filter(r => r.id !== id));
+    });
+  };
+
+  return (
+    <>
+      <div className={styles.listItem} onClick={() => setIsOpen(!isOpen)}>
+        <div className={styles.itemLeft}>
+          <div className={`${styles.iconWrap} ${styles.blue}`}><Sparkles size={18} /></div>
+          <div className={styles.itemText}>
+            <div className={styles.itemTitle}>Merchant Auto-Categorization</div>
+            <div className={styles.itemSubtitle}>View and manage learned renaming rules</div>
+          </div>
+        </div>
+        <div className={styles.itemRight}>
+          <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>{isOpen ? "Collapse" : "Expand"}</span>
+        </div>
+      </div>
+      
+      {isOpen && (
+        <div className={styles.expandedPanel}>
+          {!loaded ? (
+            <div style={{ padding: "12px", color: "var(--text-tertiary)", fontSize: "13px" }}>Loading...</div>
+          ) : rules.length === 0 ? (
+            <div style={{ padding: "12px", color: "var(--text-tertiary)", fontSize: "13px", textAlign: "center" }}>
+              No rules found. When you edit a synced transaction, check the "Apply to future" box to create one!
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {rules.map((rule) => (
+                <div key={rule.id} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "10px 12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "8px"
+                }}>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-tertiary)", textTransform: "uppercase", fontWeight: 600 }}>Original</span>
+                    <span style={{ fontSize: "13px", color: "var(--text-primary)", fontWeight: 500 }}>{rule.synced_name}</span>
+                  </div>
+                  <span style={{ color: "var(--text-tertiary)" }}>→</span>
+                  <div style={{ display: "flex", flexDirection: "column", flex: 1, paddingLeft: "12px" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-tertiary)", textTransform: "uppercase", fontWeight: 600 }}>Renames to</span>
+                    <span style={{ fontSize: "13px", color: "var(--text-primary)", fontWeight: 500 }}>
+                      {rule.renamed_to} {rule.categories?.name ? `(${rule.categories.name})` : ""}
+                    </span>
+                  </div>
+                  <button 
+                    disabled={isPending}
+                    onClick={() => handleDelete(rule.id)}
+                    style={{ background: "transparent", border: "none", color: "var(--danger)", cursor: "pointer", padding: "4px" }}
+                    title="Delete rule"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }

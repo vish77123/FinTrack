@@ -60,6 +60,7 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
   const [note, setNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [saveRule, setSaveRule] = useState(true);
 
   // CC context helpers
   const selectedAccount = useMemo(() => availableAccounts.find(a => a.id === accountId), [availableAccounts, accountId]);
@@ -151,6 +152,7 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
       }
     }
     setErrorMsg("");
+    setSaveRule(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingTransaction, availableAccounts]);
 
@@ -243,6 +245,7 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
 
     formData.append("date", new Date(date).toISOString());
     if (note) formData.append("note", note);
+    if (saveRule) formData.append("save_merchant_rule", "true");
 
     if (isSplitMode && type !== 'transfer') {
       // Validate splits
@@ -941,6 +944,21 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
           onChange={(e) => setNote(e.target.value)}
         />
       </div>
+
+      {isEditing && editingTransaction?.original_synced_name && type !== "transfer" && (
+        <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+          <input 
+            type="checkbox" 
+            id="saveRule" 
+            checked={saveRule} 
+            onChange={e => setSaveRule(e.target.checked)} 
+            style={{ width: "16px", height: "16px", accentColor: "var(--accent)", cursor: "pointer" }}
+          />
+          <label htmlFor="saveRule" style={{ fontSize: "13px", color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
+            Apply to future transactions from <strong>{editingTransaction.original_synced_name}</strong>
+          </label>
+        </div>
+      )}
     </BaseModal>
   );
 }

@@ -612,6 +612,7 @@ export default function TransactionsView({ transactions, currency, categories = 
                                   date: txn.date || new Date().toISOString(),
                                   note: txn.note || txn.merchant || "",
                                   source: "transaction",
+                                  original_synced_name: txn.original_synced_name,
                                   splitGroupId: txn.splitGroupId,
                                   splitChildren: txn.children,
                                 });
@@ -653,6 +654,7 @@ export default function TransactionsView({ transactions, currency, categories = 
                                 date: txn.date || new Date().toISOString(),
                                 note: txn.note || txn.merchant || "",
                                 source: "transaction",
+                                original_synced_name: txn.original_synced_name,
                               })}
                               disabled={isPending}
                               className={styles.deleteBtn}
@@ -717,6 +719,7 @@ export default function TransactionsView({ transactions, currency, categories = 
                                     date: child.date || new Date().toISOString(),
                                     note: child.note || "",
                                     source: "transaction",
+                                    original_synced_name: child.original_synced_name || txn.original_synced_name,
                                     isSplitChild: true,
                                   })}
                                   disabled={isPending}

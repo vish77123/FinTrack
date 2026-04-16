@@ -204,6 +204,7 @@ export default function PendingTray({ items, currency }: PendingTrayProps) {
                     date: item.date || new Date().toISOString(),
                     note: item.note || "",
                     source: "pending",
+                    original_synced_name: (item as any).original_synced_name,
                   });
                 }}
                 disabled={isProcessing}

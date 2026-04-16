@@ -328,6 +328,17 @@ export async function editTransactionAction(transactionId: string, formData: For
 
   if (updateError) return { error: "Failed to update transaction." };
 
+  // Auto-learn merchant rule if requested
+  const saveRule = formData.get("save_merchant_rule") === "true";
+  if (saveRule && existing.original_synced_name) {
+    await supabase.from("merchant_rules").upsert({
+      user_id: user.id,
+      synced_name: existing.original_synced_name,
+      renamed_to: newNote,
+      category_id: newCategoryId || null
+    }, { onConflict: "user_id, synced_name" });
+  }
+
   // Apply new balance effect (CC-aware)
   await applyBalanceUpdate(supabase, {
     type: newType,
@@ -355,6 +366,23 @@ export async function updatePendingTransactionAction(pendingId: string, formData
   const newNote = formData.get("note") as string || "";
 
   if (!newAmount || newAmount <= 0) return { error: "Amount must be greater than zero." };
+
+  const { data: existing } = await supabase
+    .from("pending_transactions")
+    .select("original_synced_name")
+    .eq("id", pendingId)
+    .eq("user_id", user.id)
+    .single();
+
+  const saveRule = formData.get("save_merchant_rule") === "true";
+  if (saveRule && existing?.original_synced_name) {
+    await supabase.from("merchant_rules").upsert({
+      user_id: user.id,
+      synced_name: existing.original_synced_name,
+      renamed_to: newNote,
+      category_id: newCategoryId || null
+    }, { onConflict: "user_id, synced_name" });
+  }
 
   const { error: updateError } = await supabase
     .from("pending_transactions")
