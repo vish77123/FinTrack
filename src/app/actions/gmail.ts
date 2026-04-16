@@ -321,6 +321,24 @@ export async function syncGmailAction() {
       continue;
     }
 
+    // --- DATE VALIDATION ---
+    // Extractors (Regex and LLM) sometimes hallucinate or pick up transaction IDs 
+    // that look like dates (e.g. "26/04/23" causing 2023 issues in 2026).
+    // Ensure the parsed date remains within 14 days of the actual email receipt.
+    if (parsed.date && email.emailDate) {
+      const parsedDateObj = new Date(parsed.date);
+      const emailDateObj = new Date(email.emailDate);
+      
+      const diffTime = Math.abs(emailDateObj.getTime() - parsedDateObj.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      // If parsing resulted in a date > 14 days away from the email's arrival, fallback to email date
+      if (diffDays > 14) {
+        console.log(`[SYNC] Date hallucination detected (diff: ${diffDays} days). Parsed: ${parsed.date}, Email: ${email.emailDate}. Falling back to email date.`);
+        parsed.date = email.emailDate;
+      }
+    }
+
     const originalMerchantName = parsed.merchant;
     let ruleMatched = false;
 
@@ -509,6 +527,8 @@ export async function approvePendingAction(pendingId: string) {
       note: pending.note,
       source_email_id: pending.source_email_id,
       original_synced_name: pending.original_synced_name,
+      raw_sms_id: pending.raw_sms_id || null,
+      source: pending.source || 'email',
     });
 
   if (txnError) return { error: "Failed to save transaction." };
@@ -596,6 +616,8 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
         note: pending.note,
         source_email_id: pending.source_email_id,
         original_synced_name: pending.original_synced_name,
+        raw_sms_id: pending.raw_sms_id || null,
+        source: pending.source || 'email',
       });
 
     if (!txnError && pending.account_id) {

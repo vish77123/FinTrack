@@ -84,7 +84,7 @@ export async function getUserProfileAction() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, currency_code")
+    .select("display_name, currency_code, webhook_secret")
     .eq("id", user.id)
     .single();
 
@@ -93,6 +93,7 @@ export async function getUserProfileAction() {
     email: user.email || "",
     displayName: profile?.display_name || user.user_metadata?.full_name || "",
     currencyCode: profile?.currency_code || "INR",
+    webhookSecret: profile?.webhook_secret || null,
   };
 }
 

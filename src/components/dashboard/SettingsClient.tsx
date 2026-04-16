@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { signOut } from "@/app/login/actions";
 import { 
   User, DollarSign, Moon, Sun, Monitor, Tag, Download, LogOut,
-  Check, X, Pencil, Save, Mail, Zap, Bot, RefreshCw, Clock, Key, Sparkles, Eye, EyeOff, AlertTriangle
+  Check, X, Pencil, Save, Mail, Zap, Bot, RefreshCw, Clock, Key, Sparkles, Eye, EyeOff, AlertTriangle,
+  Smartphone, Copy, ChevronDown, ChevronUp, RotateCcw
 } from "lucide-react";
 import styles from "@/components/dashboard/settings.module.css";
 import { useUIStore } from "@/store/useUIStore";
@@ -26,6 +27,9 @@ import {
   getMerchantRulesAction, 
   deleteMerchantRuleAction 
 } from "@/app/actions/merchantRulesActions";
+import {
+  regenerateWebhookSecretAction
+} from "@/app/actions/sms";
 
 const CURRENCIES = [
   { code: "INR", symbol: "₹", label: "Indian Rupee (₹)" },
@@ -70,6 +74,12 @@ export function SettingsClient() {
   const [syncInterval, setSyncInterval] = useState(60);
   const [aiProvider, setAiProvider] = useState<"gemini" | "bytez">("gemini");
 
+  // SMS forwarding state
+  const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const [smsCopied, setSmsCopied] = useState(false);
+  const [smsGuideOpen, setSmsGuideOpen] = useState(false);
+  const [smsRegenerateMsg, setSmsRegenerateMsg] = useState("");
+
   // Load profile on mount
   useEffect(() => {
     getUserProfileAction().then((res) => {
@@ -77,6 +87,7 @@ export function SettingsClient() {
         setDisplayName(res.displayName || "");
         setEmail(res.email || "");
         setSelectedCurrency(res.currencyCode || "INR");
+        setWebhookSecret((res as any).webhookSecret || null);
         setProfileLoaded(true);
       }
     });
@@ -511,6 +522,122 @@ export function SettingsClient() {
                   </select>
                 </div>
               </div>
+
+            </div>
+          </div>
+
+          {/* SMS FORWARDING SECTION */}
+          <div className={styles.settingsSection}>
+            <div className={styles.sectionTitle}>SMS FORWARDING</div>
+            <div className={styles.listBlock}>
+
+              {/* Webhook URL */}
+              <div className={styles.listItem}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.green}`}><Smartphone size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>Webhook URL</div>
+                    <div className={styles.itemSubtitle} style={{ wordBreak: "break-all", fontSize: "11px", fontFamily: "monospace" }}>
+                      {webhookSecret
+                        ? `${typeof window !== "undefined" ? window.location.origin : ""}/api/sms?secret=${webhookSecret}`
+                        : "Loading..."}
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.itemRight} style={{ display: "flex", gap: "6px" }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!webhookSecret) return;
+                      const url = `${window.location.origin}/api/sms?secret=${webhookSecret}`;
+                      navigator.clipboard.writeText(url);
+                      setSmsCopied(true);
+                      setTimeout(() => setSmsCopied(false), 2000);
+                    }}
+                    style={{
+                      background: "transparent", border: "1px solid var(--border)", borderRadius: "6px",
+                      padding: "6px 10px", cursor: "pointer", color: smsCopied ? "var(--success)" : "var(--text-secondary)",
+                      display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", fontWeight: 500,
+                    }}
+                    title="Copy URL"
+                  >
+                    {smsCopied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
+                  </button>
+                </div>
+              </div>
+
+              {/* Regenerate Secret */}
+              <div className={styles.listItem} onClick={() => {
+                if (isPending) return;
+                startTransition(async () => {
+                  const res = await regenerateWebhookSecretAction();
+                  if (res.error) {
+                    setSmsRegenerateMsg(`Error: ${res.error}`);
+                  } else {
+                    setWebhookSecret(res.secret || null);
+                    setSmsRegenerateMsg("Secret regenerated!");
+                  }
+                  setTimeout(() => setSmsRegenerateMsg(""), 3000);
+                });
+              }}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.orange}`}><RotateCcw size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>Regenerate Secret</div>
+                    <div className={styles.itemSubtitle}>
+                      {smsRegenerateMsg || "Generate a new webhook URL (invalidates old one)"}
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.itemRight}>
+                  <RotateCcw size={16} />
+                </div>
+              </div>
+
+              {/* iPhone Shortcut Guide */}
+              <div className={styles.listItem} onClick={() => setSmsGuideOpen(!smsGuideOpen)}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.purple}`}><Key size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>iPhone Shortcut Setup</div>
+                    <div className={styles.itemSubtitle}>Step-by-step guide to auto-forward SMS</div>
+                  </div>
+                </div>
+                <div className={styles.itemRight}>
+                  {smsGuideOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </div>
+              </div>
+
+              {smsGuideOpen && (
+                <div className={styles.expandedPanel}>
+                  <div style={{ fontSize: "13px", lineHeight: "1.8", color: "var(--text-secondary)" }}>
+                    <p style={{ fontWeight: 600, marginBottom: "8px", color: "var(--text-primary)" }}>
+                      Automate bank SMS forwarding from your iPhone:
+                    </p>
+                    <ol style={{ paddingLeft: "18px", margin: 0 }}>
+                      <li>Open <strong>Shortcuts</strong> → <strong>Automation</strong> → <strong>New Automation</strong></li>
+                      <li>Trigger: <strong>"When I receive a message"</strong> from your bank sender IDs
+                        <br />
+                        <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                          e.g. BW-HDFCBK, AD-ICICIT, AX-SBIINB, VM-KOTAKB
+                        </span>
+                      </li>
+                      <li>Action: <strong>"Get Contents of URL"</strong>
+                        <ul style={{ paddingLeft: "16px", marginTop: "4px" }}>
+                          <li>URL: <em>Your webhook URL (copied above)</em></li>
+                          <li>Method: <strong>POST</strong></li>
+                          <li>Headers: <code style={{ fontSize: "11px", background: "var(--surface)", padding: "2px 6px", borderRadius: "4px" }}>Content-Type: application/json</code></li>
+                          <li>Body: <code style={{ fontSize: "11px", background: "var(--surface)", padding: "2px 6px", borderRadius: "4px" }}>{`{ "sender": "[Sender]", "body": "[Message]" }`}</code></li>
+                        </ul>
+                      </li>
+                      <li>Toggle <strong>"Run Immediately"</strong> (no confirmation prompt)</li>
+                    </ol>
+                    <p style={{ marginTop: "12px", fontSize: "12px", color: "var(--text-tertiary)" }}>
+                      💡 Tip: Create one automation per bank sender ID for best results.
+                    </p>
+                  </div>
+                </div>
+              )}
 
             </div>
           </div>

@@ -100,6 +100,7 @@ export default function PendingTray({ items, currency }: PendingTrayProps) {
   };
 
   const getSourceIcon = (parsedBy: string) => {
+    if (parsedBy.startsWith("sms-")) return <Smartphone size={12} className="mr-1 inline" />;
     return parsedBy === "llm" ? <Bot size={12} className="mr-1 inline" /> : <Zap size={12} className="mr-1 inline" />;
   };
 
@@ -177,7 +178,7 @@ export default function PendingTray({ items, currency }: PendingTrayProps) {
                 {item.accounts?.name && <span> • {item.accounts.name}</span>}
                 <span className={styles.pendingSource} style={{ marginLeft: "8px" }}>
                   {getSourceIcon(item.parsed_by)}
-                  {item.parsed_by === "llm" ? "AI Parsed" : "Regex Parsed"}
+                  {item.parsed_by.startsWith("sms-") ? "SMS Parsed" : item.parsed_by === "llm" ? "AI Parsed" : "Regex Parsed"}
                 </span>
                 <span>• {new Date(item.date).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}</span>
               </div>
