@@ -515,7 +515,11 @@ export async function syncGmailAction() {
           .insert({
             user_id: user.id,
             name: fallbackNewCategory.name,
-            icon: fallbackNewCategory.icon || "🏷️",
+            // Sanitize icon: only use it if it contains non-ASCII chars (i.e. is an emoji).
+            // CSS class names like "icon-question" would otherwise render as literal text in the UI.
+            icon: (fallbackNewCategory.icon && !/^[a-zA-Z0-9\-_]+$/.test(fallbackNewCategory.icon))
+              ? fallbackNewCategory.icon
+              : "🏷️",
             color: fallbackNewCategory.color || "#888888",
             type: fallbackNewCategory.type || parsed.type,
           })

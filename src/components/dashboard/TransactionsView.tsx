@@ -93,6 +93,16 @@ export default function TransactionsView({ transactions, currency, categories = 
     }
   };
 
+  // Guard against CSS class names (e.g. "icon-question") stored in the DB icon column.
+  // A valid renderable icon must be a short string containing at least one non-ASCII
+  // character (emoji) or be a known single ASCII symbol, not a kebab-case class name.
+  const isRenderableIcon = (icon: string | null | undefined): boolean => {
+    if (!icon || typeof icon !== "string") return false;
+    // CSS class names contain only ASCII letters, digits, and hyphens
+    if (/^[a-zA-Z0-9\-_]+$/.test(icon)) return false;
+    return true;
+  };
+
   // Compute unique categories and accounts from transactions for filter dropdowns
   const uniqueCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -550,7 +560,7 @@ export default function TransactionsView({ transactions, currency, categories = 
                           className={styles.txnIconWrap}
                           style={txn.color ? { backgroundColor: `${txn.color}15`, color: txn.color, borderColor: `${txn.color}30` } : undefined}
                         >
-                          {isSplitGroup ? "✂️" : isTransfer ? "↔️" : txn.icon || getIcon(txn.category)}
+                          {isSplitGroup ? "✂️" : isTransfer ? "↔️" : (isRenderableIcon(txn.icon) ? txn.icon : getIcon(txn.category))}
                         </div>
                         <div className={styles.txnDetails}>
                           <div className={styles.txnTitle}>
@@ -693,7 +703,7 @@ export default function TransactionsView({ transactions, currency, categories = 
                                   <div className={styles.splitConnectorDot} />
                                 </div>
                                 <div className={styles.childIconWrap}>
-                                  {childIsTransfer ? "👤" : child.icon || getIcon(child.category)}
+                                  {childIsTransfer ? "👤" : (isRenderableIcon(child.icon) ? child.icon : getIcon(child.category))}
                                 </div>
                                 <div>
                                   <div className={styles.childLabel}>

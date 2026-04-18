@@ -38,6 +38,12 @@ export default function TransactionList({ items, currency }: TransactionListProp
     }
   };
 
+  const isRenderableIcon = (icon: string | null | undefined): boolean => {
+    if (!icon || typeof icon !== "string") return false;
+    if (/^[a-zA-Z0-9\-_]+$/.test(icon)) return false;
+    return true;
+  };
+
   const handleDeleteClick = (id: string, merchant: string, isSplitGroup = false) => {
     setDeletingId(id);
     setDeletingName(merchant);
@@ -139,7 +145,7 @@ export default function TransactionList({ items, currency }: TransactionListProp
                     className={styles.txnIcon}
                     style={txn.color ? { backgroundColor: `${txn.color}15`, color: txn.color, borderColor: `${txn.color}30` } : { background: `${txn.categoryColor || '#eee'}20`, color: txn.categoryColor || '#333' }}
                   >
-                    {txn.isSplitGroup ? "✂️" : (txn.icon || getIcon(txn.category))}
+                    {txn.isSplitGroup ? "✂️" : (isRenderableIcon(txn.icon) ? txn.icon : getIcon(txn.category))}
                   </div>
                   
                   <div className={styles.txnDetails}>
