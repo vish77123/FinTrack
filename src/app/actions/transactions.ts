@@ -320,6 +320,7 @@ export async function editTransactionAction(transactionId: string, formData: For
       type: newType === "cc_payment" ? "transfer" : newType,
       account_id: newAccountId,
       category_id: newCategoryId,
+      transfer_to_account_id: formData.get("transfer_to_account_id") as string || null,
       date: newDate,
       note: newNote,
     })
@@ -384,6 +385,8 @@ export async function updatePendingTransactionAction(pendingId: string, formData
     }, { onConflict: "user_id, synced_name" });
   }
 
+  const newTransferToAccountId = formData.get("transfer_to_account_id") as string || null;
+
   const { error: updateError } = await supabase
     .from("pending_transactions")
     .update({
@@ -393,6 +396,7 @@ export async function updatePendingTransactionAction(pendingId: string, formData
       category_id: newCategoryId,
       date: newDate,
       note: newNote,
+      transfer_to_account_id: newTransferToAccountId,
     })
     .eq("id", pendingId)
     .eq("user_id", user.id);

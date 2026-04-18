@@ -93,6 +93,7 @@ export function AddTransactionModal({ isOpen, onClose, availableAccounts, availa
       setType(editingTransaction.type);
       setAmount(String(editingTransaction.amount));
       setAccountId(editingTransaction.account_id || availableAccounts[0]?.id || "");
+      setToAccountId(editingTransaction.transfer_to_account_id || "");
       setCategoryId(editingTransaction.category_id || "");
       setDate(editingTransaction.date ? new Date(editingTransaction.date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]);
       setNote(editingTransaction.note || "");

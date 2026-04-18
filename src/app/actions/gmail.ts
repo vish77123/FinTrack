@@ -5,6 +5,66 @@ import { revalidatePath } from "next/cache";
 import { parseTransactionText, isBankSender } from "@/lib/email/parser";
 import { parseBatchWithLLM } from "@/lib/email/llmParser";
 import { parseBatchWithBytez } from "@/lib/email/bytezParser";
+// Local balance-update helper — mirrors the one in transactions.ts.
+// We keep it inline here to avoid cross-"use server" module imports,
+// which can cause Next.js to fail loading the entire gmail actions module.
+async function applyPendingBalanceUpdate(
+  supabase: any,
+  payload: { type: string; amount: number; account_id: string | null; transfer_to_account_id?: string | null }
+) {
+  const amount = Number(payload.amount);
+
+  if (payload.type === "expense" || payload.type === "income" || payload.type === "cc_payment") {
+    if (!payload.account_id) return;
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("type, balance, outstanding_balance")
+      .eq("id", payload.account_id)
+      .single();
+    if (!account) return;
+    if (account.type === "credit_card") {
+      const delta = payload.type === "expense" ? amount : -amount;
+      const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
+      await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
+    } else {
+      const delta = payload.type === "income" ? amount : -amount;
+      await supabase.from("accounts").update({ balance: (Number(account.balance) || 0) + delta }).eq("id", payload.account_id);
+    }
+  } else if (payload.type === "transfer") {
+    // Debit source account
+    if (payload.account_id) {
+      const { data: fromAccount } = await supabase
+        .from("accounts")
+        .select("type, balance, outstanding_balance")
+        .eq("id", payload.account_id)
+        .single();
+      if (fromAccount) {
+        if (fromAccount.type === "credit_card") {
+          const newOutstanding = Math.max(0, (Number(fromAccount.outstanding_balance) || 0) + amount);
+          await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
+        } else {
+          await supabase.from("accounts").update({ balance: (Number(fromAccount.balance) || 0) - amount }).eq("id", payload.account_id);
+        }
+      }
+    }
+    // Credit destination account
+    if (payload.transfer_to_account_id) {
+      const { data: toAccount } = await supabase
+        .from("accounts")
+        .select("type, balance, outstanding_balance")
+        .eq("id", payload.transfer_to_account_id)
+        .single();
+      if (toAccount) {
+        if (toAccount.type === "credit_card") {
+          const newOutstanding = Math.max(0, (Number(toAccount.outstanding_balance) || 0) - amount);
+          await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.transfer_to_account_id);
+        } else {
+          await supabase.from("accounts").update({ balance: (Number(toAccount.balance) || 0) + amount }).eq("id", payload.transfer_to_account_id);
+        }
+      }
+    }
+  }
+}
 
 // ═══════════════════════════════════════════════════════════
 // BODY EXTRACTION — handles nested MIME structures
@@ -53,6 +113,44 @@ function extractBodyFromParts(parts: any[]): string {
 }
 
 // ═══════════════════════════════════════════════════════════
+// TOKEN REFRESH HELPER
+// ═══════════════════════════════════════════════════════════
+
+async function refreshGoogleToken(refreshToken: string) {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    console.error("[SYNC] Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables.");
+    return null;
+  }
+
+  try {
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error("[SYNC] Failed to refresh token:", err);
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("[SYNC] Token refresh exception:", error);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // MAIN SYNC ACTION
 // ═══════════════════════════════════════════════════════════
 
@@ -70,6 +168,36 @@ export async function syncGmailAction() {
 
   if (!tokenRow?.access_token) {
     return { error: "Gmail not connected. Please sign in with Google." };
+  }
+
+  let accessToken = tokenRow.access_token;
+
+  // Check if token is expired or expiring within 5 minutes
+  const isExpired = tokenRow.expires_at ? new Date(tokenRow.expires_at).getTime() < Date.now() + 5 * 60 * 1000 : false;
+  
+  if (isExpired && tokenRow.refresh_token) {
+    console.log("[SYNC] Token is expired. Attempting to refresh...");
+    const refreshed = await refreshGoogleToken(tokenRow.refresh_token);
+    if (refreshed && refreshed.access_token) {
+      accessToken = refreshed.access_token;
+      const newExpiresAt = new Date(Date.now() + (refreshed.expires_in * 1000 || 3600 * 1000)).toISOString();
+      
+      // Save new token to db
+      await supabase
+        .from("gmail_tokens")
+        .update({
+          access_token: accessToken,
+          expires_at: newExpiresAt,
+        })
+        .eq("user_id", user.id);
+      
+      console.log("[SYNC] Token refreshed successfully.");
+    } else {
+      console.log("[SYNC] Token refresh failed. The user needs to sign in again.");
+      return { error: "Gmail token expired and refresh failed. Please sign in with Google again." };
+    }
+  } else if (isExpired && !tokenRow.refresh_token) {
+    return { error: "Gmail token expired. Please sign in with Google again." };
   }
 
   // Get sync settings
@@ -117,11 +245,11 @@ export async function syncGmailAction() {
   try {
     const listRes = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=20`,
-      { headers: { Authorization: `Bearer ${tokenRow.access_token}` } }
+      { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
     if (listRes.status === 401) {
-      return { error: "Gmail token expired. Please sign in with Google again." };
+      return { error: "Gmail token expired or revoked. Please sign in with Google again." };
     }
 
     if (!listRes.ok) {
@@ -189,7 +317,7 @@ export async function syncGmailAction() {
     try {
       const msgRes = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
-        { headers: { Authorization: `Bearer ${tokenRow.access_token}` } }
+        { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       if (!msgRes.ok) continue;
       messageData = await msgRes.json();
@@ -529,36 +657,17 @@ export async function approvePendingAction(pendingId: string) {
       original_synced_name: pending.original_synced_name,
       raw_sms_id: pending.raw_sms_id || null,
       source: pending.source || 'email',
+      transfer_to_account_id: pending.transfer_to_account_id || null,
     });
 
   if (txnError) return { error: "Failed to save transaction." };
 
-  if (pending.account_id) {
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("type, balance, outstanding_balance")
-      .eq("id", pending.account_id)
-      .single();
-    if (account) {
-      if (account.type === "credit_card") {
-        // CC expense → more debt; cc_payment → reduce debt
-        const delta = (pending.type === "expense") ? Number(pending.amount) : -Number(pending.amount);
-        const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
-        await supabase
-          .from("accounts")
-          .update({ outstanding_balance: newOutstanding })
-          .eq("id", pending.account_id);
-      } else {
-        const newBalance = pending.type === "expense"
-          ? Number(account.balance) - Number(pending.amount)
-          : Number(account.balance) + Number(pending.amount);
-        await supabase
-          .from("accounts")
-          .update({ balance: newBalance })
-          .eq("id", pending.account_id);
-      }
-    }
-  }
+  await applyPendingBalanceUpdate(supabase, {
+    type: pending.type,
+    amount: Number(pending.amount),
+    account_id: pending.account_id,
+    transfer_to_account_id: pending.transfer_to_account_id || null,
+  });
 
   await supabase
     .from("pending_transactions")
@@ -618,26 +727,16 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
         original_synced_name: pending.original_synced_name,
         raw_sms_id: pending.raw_sms_id || null,
         source: pending.source || 'email',
+        transfer_to_account_id: pending.transfer_to_account_id || null,
       });
 
-    if (!txnError && pending.account_id) {
-      const { data: account } = await supabase
-        .from("accounts")
-        .select("type, balance, outstanding_balance")
-        .eq("id", pending.account_id)
-        .single();
-      if (account) {
-        if (account.type === "credit_card") {
-          const delta = (pending.type === "expense") ? Number(pending.amount) : -Number(pending.amount);
-          const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
-          await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", pending.account_id);
-        } else {
-          const newBalance = pending.type === "expense"
-            ? Number(account.balance) - Number(pending.amount)
-            : Number(account.balance) + Number(pending.amount);
-          await supabase.from("accounts").update({ balance: newBalance }).eq("id", pending.account_id);
-        }
-      }
+    if (!txnError) {
+      await applyPendingBalanceUpdate(supabase, {
+        type: pending.type,
+        amount: Number(pending.amount),
+        account_id: pending.account_id,
+        transfer_to_account_id: pending.transfer_to_account_id || null,
+      });
     }
   }
 
@@ -774,7 +873,7 @@ export async function getPendingTransactionsAction() {
     .from("pending_transactions")
     .select(`
       *,
-      accounts(name)
+      accounts!account_id(name)
     `)
     .eq("user_id", user.id)
     .eq("status", "pending")

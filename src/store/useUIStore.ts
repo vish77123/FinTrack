@@ -6,6 +6,7 @@ interface EditingTransaction {
   amount: number;
   account_id: string;
   category_id?: string | null;
+  transfer_to_account_id?: string | null;
   date: string;
   note?: string;
   source: "transaction" | "pending"; // which table it came from
