@@ -66,7 +66,7 @@ export default async function DashboardPage() {
       />
       
       <div className={styles.contentGrid}>
-        <TransactionList items={dashboardData.recentTransactions} currency={dashboardData.currency} />
+        <TransactionList items={dashboardData.recentTransactions.slice(0, 5)} currency={dashboardData.currency} />
         
         <div className={styles.budgetGrid}>
           <SpendingChart data={dashboardData.spendingData} />

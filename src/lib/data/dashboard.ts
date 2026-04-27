@@ -142,8 +142,7 @@ export async function getDashboardData() {
           transfer_account:accounts!transactions_transfer_to_account_id_fkey(name, type)
         `)
         .eq("user_id", user.id)
-        .order("date", { ascending: false })
-        .limit(50),
+        .order("date", { ascending: false }),
       supabase
         .from("savings_goals")
         .select("*")
@@ -293,7 +292,8 @@ export async function getDashboardData() {
     // Right now, we construct a generic spending array from the raw transactions for Donut Charts
     const spendingMap = new Map();
     (transactionsRaw || []).forEach(txn => {
-      if (txn.type === 'expense' && txn.categories) {
+      const txnDate = new Date(txn.date);
+      if (txn.type === 'expense' && txn.categories && txnDate >= monthStart) {
         const cat = txn.categories.name;
         if (!spendingMap.has(cat)) {
           spendingMap.set(cat, { name: cat, value: 0, color: txn.categories.color || "#888" });

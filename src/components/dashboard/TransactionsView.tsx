@@ -106,23 +106,54 @@ export default function TransactionsView({ transactions, currency, categories = 
   // Compute unique categories and accounts from transactions for filter dropdowns
   const uniqueCategories = useMemo(() => {
     const cats = new Set<string>();
+    categories.forEach(cat => {
+      if (cat.name) cats.add(cat.name);
+    });
     transactions.forEach(group => {
       group.transactions.forEach((txn: any) => {
         if (txn.category) cats.add(txn.category);
       });
     });
     return Array.from(cats).sort();
-  }, [transactions]);
+  }, [transactions, categories]);
 
-  const uniqueAccounts = useMemo(() => {
-    const accs = new Set<string>();
+  const accountGroups = useMemo(() => {
+    const normalAccs = new Set<string>();
+    const contactAccs = new Set<string>();
+
+    accounts.forEach(acc => {
+      if (!acc.name) return;
+      if (acc.type === "contact") {
+        contactAccs.add(acc.name);
+      } else {
+        normalAccs.add(acc.name);
+      }
+    });
+
     transactions.forEach(group => {
       group.transactions.forEach((txn: any) => {
-        if (txn.account) accs.add(txn.account);
+        if (txn.account) {
+          if (!contactAccs.has(txn.account) && !normalAccs.has(txn.account)) {
+            normalAccs.add(txn.account);
+          }
+        }
+        if (txn.transfer_account_name) {
+          if (!contactAccs.has(txn.transfer_account_name) && !normalAccs.has(txn.transfer_account_name)) {
+            if (txn.transfer_account_type === "contact") {
+              contactAccs.add(txn.transfer_account_name);
+            } else {
+              normalAccs.add(txn.transfer_account_name);
+            }
+          }
+        }
       });
     });
-    return Array.from(accs).sort();
-  }, [transactions]);
+
+    return {
+      normal: Array.from(normalAccs).sort(),
+      contact: Array.from(contactAccs).sort()
+    };
+  }, [transactions, accounts]);
 
   // Apply all filters to produce filtered transaction groups
   const filteredTransactions = useMemo(() => {
@@ -149,7 +180,7 @@ export default function TransactionsView({ transactions, currency, categories = 
           if (categoryFilter !== "all" && txn.category !== categoryFilter) return false;
 
           // Account filter
-          if (accountFilter !== "all" && txn.account !== accountFilter) return false;
+          if (accountFilter !== "all" && txn.account !== accountFilter && txn.transfer_account_name !== accountFilter) return false;
 
           // Date filter
           if (dateFilter !== "all") {
@@ -393,9 +424,20 @@ export default function TransactionsView({ transactions, currency, categories = 
             onChange={(e) => setAccountFilter(e.target.value)}
           >
             <option value="all">All Accounts</option>
-            {uniqueAccounts.map(acc => (
-              <option key={acc} value={acc}>{acc}</option>
-            ))}
+            {accountGroups.normal.length > 0 && (
+              <optgroup label="Accounts">
+                {accountGroups.normal.map(acc => (
+                  <option key={acc} value={acc}>{acc}</option>
+                ))}
+              </optgroup>
+            )}
+            {accountGroups.contact.length > 0 && (
+              <optgroup label="Contacts & Roommates">
+                {accountGroups.contact.map(acc => (
+                  <option key={acc} value={acc}>{acc}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
       </div>
@@ -509,7 +551,16 @@ export default function TransactionsView({ transactions, currency, categories = 
                 <div className={styles.sheetSectionLabel}>Account</div>
                 <select className={styles.sheetSelect} value={accountFilter} onChange={e => setAccountFilter(e.target.value)}>
                   <option value="all">All Accounts</option>
-                  {uniqueAccounts.map(acc => <option key={acc} value={acc}>{acc}</option>)}
+                  {accountGroups.normal.length > 0 && (
+                    <optgroup label="Accounts">
+                      {accountGroups.normal.map(acc => <option key={acc} value={acc}>{acc}</option>)}
+                    </optgroup>
+                  )}
+                  {accountGroups.contact.length > 0 && (
+                    <optgroup label="Contacts & Roommates">
+                      {accountGroups.contact.map(acc => <option key={acc} value={acc}>{acc}</option>)}
+                    </optgroup>
+                  )}
                 </select>
               </div>
             </div>
