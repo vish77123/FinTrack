@@ -147,6 +147,153 @@ export async function regenerateWebhookSecretAction() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// RETRY FAILED SMS PARSE
+// ═══════════════════════════════════════════════════════════
+
+export async function retrySmsParseAction(smsId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Unauthorized" };
+
+  // 1. Fetch the raw SMS row
+  const { data: sms, error: smsError } = await supabase
+    .from("raw_sms")
+    .select("*")
+    .eq("id", smsId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (smsError || !sms) {
+    return { error: "SMS not found" };
+  }
+
+  // 2. Check dedup — if a pending_transaction already exists, skip
+  const { data: existingPending } = await supabase
+    .from("pending_transactions")
+    .select("id")
+    .eq("raw_sms_id", smsId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (existingPending) {
+    return { error: "A pending transaction already exists for this SMS" };
+  }
+
+  // 3. Fetch user settings
+  const { data: settings } = await supabase
+    .from("email_sync_settings")
+    .select("*")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const regexEnabled = settings?.regex_enabled ?? true;
+  const llmEnabled = settings?.llm_enabled ?? false;
+
+  // 4. Fetch categories for LLM context
+  const { data: categories } = await supabase
+    .from("categories")
+    .select("id, name, type")
+    .eq("user_id", user.id);
+
+  // 5. Run the 3-layer parser
+  const { parseSmsToTransaction } = await import("@/lib/sms/orchestrator");
+  const parsed = await parseSmsToTransaction(
+    {
+      id: sms.id,
+      user_id: user.id,
+      sender: sms.sender,
+      body: sms.body,
+      received_at: sms.received_at,
+    },
+    {
+      regexEnabled,
+      llmEnabled,
+      settings,
+      categories: categories || [],
+    }
+  );
+
+  if (!parsed) {
+    return { error: "Parsing failed again — LLM may still be unavailable" };
+  }
+
+  // 6. Account matching via alert profiles
+  let matchedAccountId: string | null = null;
+  const { data: alertProfiles } = await supabase
+    .from("account_alert_profiles")
+    .select("*, accounts(id, name)")
+    .eq("user_id", user.id);
+
+  if (alertProfiles && parsed.last4) {
+    const match = alertProfiles.find((p: any) => p.account_last4 === parsed.last4);
+    if (match) matchedAccountId = match.account_id;
+  }
+
+  // 7. Merchant rules
+  const { data: merchantRules } = await supabase
+    .from("merchant_rules")
+    .select("*")
+    .eq("user_id", user.id);
+
+  const originalMerchantName = parsed.merchant;
+  let finalCategoryId: string | null = parsed.categoryId || null;
+
+  if (merchantRules && merchantRules.length > 0) {
+    const ruleMatch = merchantRules.find(
+      (r: any) => r.synced_name.toLowerCase() === originalMerchantName.toLowerCase()
+    );
+    if (ruleMatch) {
+      parsed.merchant = ruleMatch.renamed_to;
+      if (ruleMatch.category_id) {
+        finalCategoryId = ruleMatch.category_id;
+      }
+    }
+  }
+
+  // 8. Date validation
+  if (parsed.date && sms.received_at) {
+    const parsedDateObj = new Date(parsed.date);
+    const receivedDateObj = new Date(sms.received_at);
+    const diffTime = Math.abs(receivedDateObj.getTime() - parsedDateObj.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays > 14) {
+      parsed.date = sms.received_at;
+    }
+  }
+
+  // 9. Convert cc_payment → transfer for DB insert
+  const insertType = parsed.type === "cc_payment" ? "transfer" : parsed.type;
+
+  // 10. Insert pending transaction
+  const { error: insertError } = await supabase
+    .from("pending_transactions")
+    .insert({
+      user_id: user.id,
+      account_id: matchedAccountId,
+      category_id: finalCategoryId,
+      type: insertType,
+      amount: parsed.amount,
+      date: parsed.date,
+      note: parsed.merchant,
+      original_synced_name: originalMerchantName,
+      confidence: parsed.confidence,
+      status: "pending",
+      raw_snippet: parsed.rawSnippet || sms.body.slice(0, 200),
+      parsed_by: parsed.parsedBy,
+      source: "sms",
+      raw_sms_id: smsId,
+    });
+
+  if (insertError) {
+    console.error(`[SMS-RETRY] Failed to insert pending transaction:`, insertError);
+    return { error: "Parsed successfully but failed to save: " + insertError.message };
+  }
+
+  revalidatePath("/sms");
+  return { success: true, amount: parsed.amount, merchant: parsed.merchant };
+}
+
+// ═══════════════════════════════════════════════════════════
 // DELETE RAW SMS
 // ═══════════════════════════════════════════════════════════
 

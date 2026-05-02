@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquare, Smartphone, CheckCircle, Clock, XCircle, Trash2, RefreshCw } from "lucide-react";
-import { getSmsLogsAction, deleteSmsAction } from "@/app/actions/sms";
+import { MessageSquare, Smartphone, CheckCircle, Clock, XCircle, Trash2, RefreshCw, RotateCcw } from "lucide-react";
+import { getSmsLogsAction, deleteSmsAction, retrySmsParseAction } from "@/app/actions/sms";
 import styles from "./sms.module.css";
 
 interface SmsLog {
@@ -24,6 +24,7 @@ export function SmsClient() {
   const [isPending, startTransition] = useTransition();
   const [logs, setLogs] = useState<SmsLog[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadLogs();
@@ -41,6 +42,27 @@ export function SmsClient() {
       await deleteSmsAction(id);
       setLogs(logs.filter(l => l.id !== id));
     });
+  };
+
+  const handleRetry = async (id: string) => {
+    setRetryingIds(prev => new Set(prev).add(id));
+    try {
+      const result = await retrySmsParseAction(id);
+      if (result.error) {
+        alert(`Retry failed: ${result.error}`);
+      } else {
+        // Refresh logs to reflect the new pending state
+        loadLogs();
+      }
+    } catch (err: any) {
+      alert(`Retry error: ${err.message || "Unknown error"}`);
+    } finally {
+      setRetryingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const handleRefresh = () => {
@@ -178,6 +200,17 @@ export function SmsClient() {
                   </div>
                   <div className={styles.smsMeta}>
                     {getStatusBadge(log.parseStatus)}
+                    {log.parseStatus === "failed" && (
+                      <button
+                        className={styles.retryBtn}
+                        onClick={() => handleRetry(log.id)}
+                        disabled={retryingIds.has(log.id)}
+                        title="Retry parsing this SMS"
+                      >
+                        <RotateCcw size={12} className={retryingIds.has(log.id) ? styles.spinning : ""} />
+                        {retryingIds.has(log.id) ? "Retrying…" : "Retry"}
+                      </button>
+                    )}
                     {log.parsedBy && (
                       <span className={styles.parserTag}>
                         via {getParserLabel(log.parsedBy)}
