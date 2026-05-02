@@ -5,7 +5,7 @@
  * Flow:
  * 1. Validate secret query param
  * 2. Insert raw_sms via Supabase RPC
- * 3. Parse SMS inline (Regex → Gemini → Bytez)
+ * 3. Parse SMS inline (Regex → Gemini → NVIDIA NIM)
  * 4. Insert pending_transaction if parsed successfully
  */
 

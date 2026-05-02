@@ -1,13 +1,13 @@
 /**
  * SMS Parser Orchestrator
- * 3-layer pipeline: Regex (reused from email) → Gemini LLM → Bytez fallback
+ * 3-layer pipeline: Regex (reused from email) → Gemini LLM → NVIDIA NIM fallback
  * 
  * Mirrors the gmail.ts sync pipeline but for SMS messages.
  */
 
 import { parseTransactionText } from "@/lib/email/parser";
 import { parseSmsWithLLM } from "./llmParser";
-import { parseSmsWithBytez } from "./bytezParser";
+import { parseSmsWithNvidia } from "./nvidiaParser";
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -29,7 +29,7 @@ export interface SmsParsedResult {
   last4: string;
   confidence: number;
   rawSnippet: string;
-  parsedBy: "sms-regex" | "sms-gemini" | "sms-bytez";
+  parsedBy: "sms-regex" | "sms-gemini" | "sms-nvidia";
   categoryId?: string;
   newCategory?: { name: string; icon: string; color: string; type: string };
 }
@@ -73,24 +73,24 @@ export async function parseSmsToTransaction(
     console.log(`[SMS-ORCH] Regex did not match (or low confidence). Trying LLM...`);
   }
 
-  // ── Layer 2 & 3: LLM (Gemini primary, Bytez fallback) ────
+  // ── Layer 2 & 3: LLM (Gemini primary, NVIDIA fallback) ────
   if (llmEnabled) {
     const msgs = [{ id: sms.id, text: sms.body, sender: sms.sender }];
 
     let llmMap: Map<string, any> = new Map();
-    let parsedBy: "sms-gemini" | "sms-bytez" = "sms-gemini";
+    let parsedBy: "sms-gemini" | "sms-nvidia" = "sms-gemini";
 
-    if (config?.settings?.selected_llm_provider === "bytez") {
-      // User prefers Bytez as primary
-      console.log(`[SMS-ORCH] Using Bytez as primary LLM provider`);
-      parsedBy = "sms-bytez";
-      llmMap = await parseSmsWithBytez(msgs, {
-        bytezKey: config?.settings?.bytez_api_key,
-        bytezModel: config?.settings?.bytez_model_id,
+    if (config?.settings?.selected_llm_provider === "nvidia") {
+      // User prefers NVIDIA as primary
+      console.log(`[SMS-ORCH] Using NVIDIA NIM as primary LLM provider`);
+      parsedBy = "sms-nvidia";
+      llmMap = await parseSmsWithNvidia(msgs, {
+        nvidiaKey: config?.settings?.nvidia_api_key,
+        nvidiaModel: config?.settings?.nvidia_model_id,
         existingCategories: config?.categories || [],
       });
     } else {
-      // Gemini primary, Bytez fallback
+      // Gemini primary, NVIDIA fallback
       console.log(`[SMS-ORCH] Using Gemini as primary LLM provider`);
       llmMap = await parseSmsWithLLM(msgs, {
         geminiKeys: config?.settings?.gemini_api_keys,
@@ -99,11 +99,11 @@ export async function parseSmsToTransaction(
       });
 
       if (llmMap.size === 0) {
-        console.log(`[SMS-ORCH] Gemini returned nothing. Falling over to Bytez...`);
-        parsedBy = "sms-bytez";
-        llmMap = await parseSmsWithBytez(msgs, {
-          bytezKey: config?.settings?.bytez_api_key,
-          bytezModel: config?.settings?.bytez_model_id,
+        console.log(`[SMS-ORCH] Gemini returned nothing. Falling over to NVIDIA NIM...`);
+        parsedBy = "sms-nvidia";
+        llmMap = await parseSmsWithNvidia(msgs, {
+          nvidiaKey: config?.settings?.nvidia_api_key,
+          nvidiaModel: config?.settings?.nvidia_model_id,
           existingCategories: config?.categories || [],
         });
       }

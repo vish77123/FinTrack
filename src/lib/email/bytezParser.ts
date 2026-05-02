@@ -56,7 +56,7 @@ export async function parseBatchWithBytez(
   }
 
   const bytez = new Bytez(apiKey);
-  const targetModel = config?.bytezModel || "Qwen/Qwen2.5-7B-Instruct";
+  const targetModel = config?.bytezModel || "mistralai/Mistral-7B-Instruct-v0.2";
 
   const emailsBlock = emails.map((email, idx) => `
 --- EMAIL ${idx + 1} (ID: ${email.id}) ---

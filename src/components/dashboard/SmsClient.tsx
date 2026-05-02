@@ -75,7 +75,7 @@ export function SmsClient() {
     switch (parsedBy) {
       case "sms-regex": return "Regex";
       case "sms-gemini": return "Gemini AI";
-      case "sms-bytez": return "Bytez AI";
+      case "sms-nvidia": return "NVIDIA NIM";
       default: return parsedBy || "—";
     }
   };

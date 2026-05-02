@@ -1,7 +1,7 @@
 /**
- * SMS Bytez LLM Parser — Layer 3 (Ultimate Fallback)
- * Adapted from src/lib/email/bytezParser.ts for SMS-specific parsing.
- * Uses the official Bytez.js SDK.
+ * SMS NVIDIA NIM Parser — Layer 3 (Fallback)
+ * Adapted from src/lib/email/nvidiaParser.ts for SMS-specific parsing.
+ * Uses the NVIDIA build.nvidia.com OpenAI-compatible API.
  */
 
 export interface LLMParsedTransaction {
@@ -35,11 +35,11 @@ function sanitize(text: string): string {
     .slice(0, 300);
 }
 
-import Bytez from "bytez.js";
+// ═══════════════════════════════════════════════════════════
+// SMS BATCH NVIDIA PARSER
+// ═══════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════
-// SMS BATCH BYTEZ PARSER
-// ═══════════════════════════════════════════════════════════
+const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 
 interface SmsForParsing {
   id: string;
@@ -47,21 +47,20 @@ interface SmsForParsing {
   sender?: string;
 }
 
-export async function parseSmsWithBytez(
+export async function parseSmsWithNvidia(
   messages: SmsForParsing[],
   config?: any
 ): Promise<Map<string, LLMParsedTransaction>> {
   const results = new Map<string, LLMParsedTransaction>();
   if (messages.length === 0) return results;
 
-  const apiKey = config?.bytezKey || process.env.BYTEZ_API_KEY;
+  const apiKey = config?.nvidiaKey || process.env.NVIDIA_API_KEY;
   if (!apiKey) {
-    console.warn("[SMS-BYTEZ] No API key configured. Skipping Bytez fallback.");
+    console.warn("[SMS-NVIDIA] No API key configured. Skipping NVIDIA fallback.");
     return results;
   }
 
-  const bytez = new Bytez(apiKey);
-  const targetModel = config?.bytezModel || "mistralai/Mistral-7B-Instruct-v0.2";
+  const targetModel = config?.nvidiaModel || "google/gemma-3n-e4b-it";
 
   const messagesBlock = messages.map((msg, idx) => `
 --- SMS ${idx + 1} (ID: ${msg.id}) ---
@@ -84,7 +83,7 @@ For EACH SMS, extract:
 2. "amount" — clean number (e.g. 500.50)
 3. "merchant" — payee name, cleaned up
 4. "type" — "expense" if debited/spent/paid, "income" if credited/received
-5. "accountLast4" — 4-digit account/card reference if present
+5. "accountLast4" — IMPORTANT: Extract ONLY the last 4 digits of the account or card number (e.g., if text says 'A/c XX1234', return '1234'). If not present, return null.
 6. "date" — ISO 8601 date string if explicitly mentioned in text
 7. "categoryId" — Use the provided "Existing User Categories". If the merchant fits cleanly into one, return its ID. If NOT, leave it null.
 8. "newCategory" — If "categoryId" is null, propose a new vibrant category object with: "name", "icon", "color", and "type" (matching the transaction type).
@@ -97,28 +96,35 @@ ${messagesBlock}
 `;
 
   try {
-    console.log(`[SMS-BYTEZ] Sending batch of ${messages.length} SMS to Bytez SDK (${targetModel})...`);
+    console.log(`[SMS-NVIDIA] Sending batch of ${messages.length} SMS to NVIDIA NIM (${targetModel})...`);
 
-    const response = await bytez.model(targetModel).run([
-      { role: "system", content: "You are a strictly deterministic extraction engine. Always output a raw JSON array." },
-      { role: "user", content: prompt }
-    ], { max_new_tokens: 2000 });
+    const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: targetModel,
+        messages: [
+          { role: "system", content: "You are a strictly deterministic extraction engine. Always output a raw JSON array. No markdown, no explanation." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.1,
+        max_tokens: 2048,
+      }),
+    });
 
-    if (response.error) {
-      console.warn(`[SMS-BYTEZ] API failed with error: ${response.error}`);
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn(`[SMS-NVIDIA] API failed (${response.status}): ${errText.slice(0, 300)}`);
       return results;
     }
 
-    let outputString = "";
-    if (typeof response.output === 'string') {
-      outputString = response.output;
-    } else if (response.output?.content) {
-      outputString = response.output.content;
-    } else {
-      outputString = JSON.stringify(response.output);
-    }
-    
-    console.log(`[SMS-BYTEZ] Raw response: ${outputString.slice(0, 600)}...`);
+    const data = await response.json();
+    let outputString = data.choices?.[0]?.message?.content || "";
+
+    console.log(`[SMS-NVIDIA] Raw response: ${outputString.slice(0, 600)}...`);
 
     let parsedArray: any[] = [];
     try {
@@ -133,16 +139,16 @@ ${messagesBlock}
           try {
             parsedArray = JSON.parse(match[0]);
           } catch (e3: any) {
-            console.error(`[SMS-BYTEZ] JSON.parse failed on matched block: ${e3.message}`);
+            console.error(`[SMS-NVIDIA] JSON.parse failed on matched block: ${e3.message}`);
           }
         } else {
-          console.error(`[SMS-BYTEZ] JSON.parse completely failed.`);
+          console.error(`[SMS-NVIDIA] JSON.parse completely failed.`);
         }
       }
     }
 
     if (Array.isArray(parsedArray)) {
-      console.log(`[SMS-BYTEZ] Parsed ${parsedArray.length} items:`);
+      console.log(`[SMS-NVIDIA] Parsed ${parsedArray.length} items:`);
 
       for (const item of parsedArray) {
         console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
@@ -162,10 +168,10 @@ ${messagesBlock}
       }
     }
 
-    console.log(`[SMS-BYTEZ ✓] ${results.size}/${messages.length} transactions extracted via Bytez`);
+    console.log(`[SMS-NVIDIA ✓] ${results.size}/${messages.length} transactions extracted via NVIDIA NIM`);
 
   } catch (err) {
-    console.error("[SMS-BYTEZ] Parsing failed:", err);
+    console.error("[SMS-NVIDIA] Parsing failed:", err);
   }
 
   return results;

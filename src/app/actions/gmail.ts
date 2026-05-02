@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { parseTransactionText, isBankSender } from "@/lib/email/parser";
 import { parseBatchWithLLM } from "@/lib/email/llmParser";
-import { parseBatchWithBytez } from "@/lib/email/bytezParser";
+import { parseBatchWithNvidia } from "@/lib/email/nvidiaParser";
 // Local balance-update helper — mirrors the one in transactions.ts.
 // We keep it inline here to avoid cross-"use server" module imports,
 // which can cause Next.js to fail loading the entire gmail actions module.
@@ -397,20 +397,20 @@ export async function syncGmailAction() {
     const config = {
       geminiKeys: settings?.gemini_api_keys,
       geminiModel: settings?.gemini_model_id,
-      bytezKey: settings?.bytez_api_key,
-      bytezModel: settings?.bytez_model_id,
+      nvidiaKey: settings?.nvidia_api_key,
+      nvidiaModel: settings?.nvidia_model_id,
       existingCategories: existingCategories || [],
     };
 
-    if (settings?.selected_llm_provider === "bytez") {
-      console.log(`[SYNC] User preferred primary provider: Bytez`);
-      llmResultsMap = await parseBatchWithBytez(emailsForLLM, config);
+    if (settings?.selected_llm_provider === "nvidia") {
+      console.log(`[SYNC] User preferred primary provider: NVIDIA NIM`);
+      llmResultsMap = await parseBatchWithNvidia(emailsForLLM, config);
     } else {
       console.log(`[SYNC] User preferred primary provider: Google Gemini`);
       llmResultsMap = await parseBatchWithLLM(emailsForLLM, config);
       if (llmResultsMap.size === 0) {
-        console.log(`[SYNC] Gemini exhausted. Gracefully failing over to Bytez...`);
-        llmResultsMap = await parseBatchWithBytez(emailsForLLM, config);
+        console.log(`[SYNC] Gemini exhausted. Gracefully failing over to NVIDIA NIM...`);
+        llmResultsMap = await parseBatchWithNvidia(emailsForLLM, config);
       }
     }
   }
@@ -825,8 +825,8 @@ export async function updateEmailSyncSettingsAction(formData: FormData) {
       updates.gemini_api_keys = keysStr ? keysStr.split(",").map(k => k.trim()).filter(Boolean) : null;
     }
     if (formData.has("gemini_model_id")) updates.gemini_model_id = formData.get("gemini_model_id");
-    if (formData.has("bytez_api_key")) updates.bytez_api_key = formData.get("bytez_api_key") || null;
-    if (formData.has("bytez_model_id")) updates.bytez_model_id = formData.get("bytez_model_id");
+    if (formData.has("nvidia_api_key")) updates.nvidia_api_key = formData.get("nvidia_api_key") || null;
+    if (formData.has("nvidia_model_id")) updates.nvidia_model_id = formData.get("nvidia_model_id");
   } else {
     updates.approval_required = formData.get("approval_required") === "true";
     updates.regex_enabled = formData.get("regex_enabled") === "true";

@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "@/app/login/actions";
-import { 
+import {
   User, DollarSign, Moon, Sun, Monitor, Tag, Download, LogOut,
   Check, X, Pencil, Save, Mail, Zap, Bot, RefreshCw, Clock, Key, Sparkles, Eye, EyeOff, AlertTriangle,
   Smartphone, Copy, ChevronDown, ChevronUp, RotateCcw
@@ -11,10 +11,10 @@ import {
 import styles from "@/components/dashboard/settings.module.css";
 import { useUIStore } from "@/store/useUIStore";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { 
-  updateProfileAction, 
-  exportAllTransactionsAction, 
-  getUserProfileAction, 
+import {
+  updateProfileAction,
+  exportAllTransactionsAction,
+  getUserProfileAction,
   updateCurrencyAction,
   resetUserAccountAction
 } from "@/app/actions/settings";
@@ -23,9 +23,9 @@ import {
   getGmailStatusAction,
   updateEmailSyncSettingsAction
 } from "@/app/actions/gmail";
-import { 
-  getMerchantRulesAction, 
-  deleteMerchantRuleAction 
+import {
+  getMerchantRulesAction,
+  deleteMerchantRuleAction
 } from "@/app/actions/merchantRulesActions";
 import {
   regenerateWebhookSecretAction
@@ -72,7 +72,7 @@ export function SettingsClient() {
   const [regexEnabled, setRegexEnabled] = useState(true);
   const [llmEnabled, setLlmEnabled] = useState(false);
   const [syncInterval, setSyncInterval] = useState(60);
-  const [aiProvider, setAiProvider] = useState<"gemini" | "bytez">("gemini");
+  const [aiProvider, setAiProvider] = useState<"gemini" | "nvidia">("gemini");
 
   // SMS forwarding state
   const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
@@ -113,8 +113,8 @@ export function SettingsClient() {
     } else {
       setTheme(mode);
     }
-    document.documentElement.setAttribute("data-theme", mode === "system" 
-      ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") 
+    document.documentElement.setAttribute("data-theme", mode === "system"
+      ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
       : mode
     );
   };
@@ -201,7 +201,7 @@ export function SettingsClient() {
       </div>
 
       <div className={styles.settingsGrid}>
-        
+
         {/* LEFT COLUMN */}
         <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
           <div className={styles.settingsSection}>
@@ -227,11 +227,11 @@ export function SettingsClient() {
               {isEditingProfile && (
                 <div className={styles.expandedPanel}>
                   {profileMsg && (
-                    <div style={{ 
+                    <div style={{
                       padding: "10px 14px", borderRadius: "8px", fontSize: "13px", marginBottom: "12px",
-                      background: profileMsg.includes("error") || profileMsg.includes("Failed") 
+                      background: profileMsg.includes("error") || profileMsg.includes("Failed")
                         ? "var(--danger-light)" : "var(--success-light)",
-                      color: profileMsg.includes("error") || profileMsg.includes("Failed") 
+                      color: profileMsg.includes("error") || profileMsg.includes("Failed")
                         ? "var(--danger)" : "var(--success)"
                     }}>
                       {profileMsg}
@@ -710,11 +710,11 @@ export function SettingsClient() {
 // tabs never contaminates the other provider's fields.
 // ═══════════════════════════════════════════════════════════
 
-function AIConfigPanel({ 
-  aiProvider, setAiProvider, gmailStatus, isPending, startTransition 
+function AIConfigPanel({
+  aiProvider, setAiProvider, gmailStatus, isPending, startTransition
 }: {
-  aiProvider: "gemini" | "bytez";
-  setAiProvider: (v: "gemini" | "bytez") => void;
+  aiProvider: "gemini" | "nvidia";
+  setAiProvider: (v: "gemini" | "nvidia") => void;
   gmailStatus: any;
   isPending: boolean;
   startTransition: (fn: () => Promise<void>) => void;
@@ -722,11 +722,11 @@ function AIConfigPanel({
   // Isolated controlled state — one set per provider
   const [geminiKeys, setGeminiKeys] = useState(gmailStatus?.settings?.gemini_api_keys?.join(", ") || "");
   const [geminiModel, setGeminiModel] = useState(gmailStatus?.settings?.gemini_model_id || "gemini-2.5-flash");
-  const [bytezKey, setBytezKey] = useState(gmailStatus?.settings?.bytez_api_key || "");
-  const [bytezModel, setBytezModel] = useState(gmailStatus?.settings?.bytez_model_id || "Qwen/Qwen2.5-7B-Instruct");
+  const [nvidiaKey, setNvidiaKey] = useState(gmailStatus?.settings?.nvidia_api_key || "");
+  const [nvidiaModel, setNvidiaModel] = useState(gmailStatus?.settings?.nvidia_model_id || "google/gemma-3n-e4b-it");
 
   const [showGeminiKeys, setShowGeminiKeys] = useState(false);
-  const [showBytezKey, setShowBytezKey] = useState(false);
+  const [showNvidiaKey, setShowNvidiaKey] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
   const handleSaveGemini = () => {
@@ -742,12 +742,12 @@ function AIConfigPanel({
     });
   };
 
-  const handleSaveBytez = () => {
+  const handleSaveNvidia = () => {
     const fd = new FormData();
     fd.append("update_ai_config", "true");
-    fd.append("selected_llm_provider", "bytez");
-    fd.append("bytez_api_key", bytezKey);
-    fd.append("bytez_model_id", bytezModel);
+    fd.append("selected_llm_provider", "nvidia");
+    fd.append("nvidia_api_key", nvidiaKey);
+    fd.append("nvidia_model_id", nvidiaModel);
     startTransition(async () => {
       await updateEmailSyncSettingsAction(fd);
       setSaveMsg("✓ Saved");
@@ -762,15 +762,15 @@ function AIConfigPanel({
       <div className={styles.aiProviderTabs}>
         <button
           className={`${styles.aiProviderTab} ${aiProvider === "gemini" ? styles.aiProviderTabActive : ""}`}
-          onClick={() => { setAiProvider("gemini"); setShowBytezKey(false); }}
+          onClick={() => { setAiProvider("gemini"); setShowNvidiaKey(false); }}
         >
           <Sparkles size={14} /> Google Gemini
         </button>
         <button
-          className={`${styles.aiProviderTab} ${aiProvider === "bytez" ? styles.aiProviderTabActive : ""}`}
-          onClick={() => { setAiProvider("bytez"); setShowGeminiKeys(false); }}
+          className={`${styles.aiProviderTab} ${aiProvider === "nvidia" ? styles.aiProviderTabActive : ""}`}
+          onClick={() => { setAiProvider("nvidia"); setShowGeminiKeys(false); }}
         >
-          <Bot size={14} /> Bytez API
+          <Bot size={14} /> NVIDIA NIM
         </button>
       </div>
 
@@ -823,27 +823,27 @@ function AIConfigPanel({
         </div>
       )}
 
-      {/* ── Bytez Config ──────────────────────────────── */}
-      {aiProvider === "bytez" && (
+      {/* ── NVIDIA NIM Config ──────────────────────────── */}
+      {aiProvider === "nvidia" && (
         <div className={styles.aiConfigBody}>
           <div className={styles.aiConfigField}>
             <label className={styles.aiConfigLabel}>API Key</label>
             <div className={styles.aiKeyInputWrap}>
               <input
-                type={showBytezKey ? "text" : "password"}
+                type={showNvidiaKey ? "text" : "password"}
                 className={styles.aiConfigInput}
-                placeholder="Enter your Bytez API key"
-                value={bytezKey}
-                onChange={(e) => setBytezKey(e.target.value)}
+                placeholder="Enter your NVIDIA API key (nvapi-...)"
+                value={nvidiaKey}
+                onChange={(e) => setNvidiaKey(e.target.value)}
                 autoComplete="off"
               />
               <button
                 className={styles.aiKeyToggle}
-                onClick={() => setShowBytezKey(!showBytezKey)}
+                onClick={() => setShowNvidiaKey(!showNvidiaKey)}
                 type="button"
-                title={showBytezKey ? "Hide key" : "Show key"}
+                title={showNvidiaKey ? "Hide key" : "Show key"}
               >
-                {showBytezKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                {showNvidiaKey ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
           </div>
@@ -853,18 +853,18 @@ function AIConfigPanel({
             <input
               type="text"
               className={styles.aiConfigInput}
-              placeholder="e.g. Qwen/Qwen2.5-7B-Instruct"
-              value={bytezModel}
-              onChange={(e) => setBytezModel(e.target.value)}
+              placeholder="e.g. google/gemma-3n-e4b-it"
+              value={nvidiaModel}
+              onChange={(e) => setNvidiaModel(e.target.value)}
             />
             <p className={styles.aiConfigHint}>
-              Any Hugging Face model ID supported by Bytez.
+              Any model available on build.nvidia.com.
             </p>
           </div>
 
           <div className={styles.aiConfigActions}>
             {saveMsg && <span className={styles.aiSaveMsg}>{saveMsg}</span>}
-            <button className={styles.aiSaveBtn} onClick={handleSaveBytez} disabled={isPending}>
+            <button className={styles.aiSaveBtn} onClick={handleSaveNvidia} disabled={isPending}>
               <Save size={14} /> {isPending ? "Saving..." : "Save"}
             </button>
           </div>
@@ -878,8 +878,8 @@ function AIConfigPanel({
 // MerchantRulesPanel — Isolated sub-component
 // ═══════════════════════════════════════════════════════════
 
-function MerchantRulesPanel({ 
-  isPending, startTransition 
+function MerchantRulesPanel({
+  isPending, startTransition
 }: {
   isPending: boolean;
   startTransition: (fn: () => Promise<void>) => void;
@@ -918,7 +918,7 @@ function MerchantRulesPanel({
           <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>{isOpen ? "Collapse" : "Expand"}</span>
         </div>
       </div>
-      
+
       {isOpen && (
         <div className={styles.expandedPanel}>
           {!loaded ? (
@@ -945,7 +945,7 @@ function MerchantRulesPanel({
                       {rule.renamed_to} {rule.categories?.name ? `(${rule.categories.name})` : ""}
                     </span>
                   </div>
-                  <button 
+                  <button
                     disabled={isPending}
                     onClick={() => handleDelete(rule.id)}
                     style={{ background: "transparent", border: "none", color: "var(--danger)", cursor: "pointer", padding: "4px" }}
