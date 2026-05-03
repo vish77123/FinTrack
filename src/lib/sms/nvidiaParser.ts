@@ -83,7 +83,7 @@ For EACH SMS, extract:
 2. "amount" — clean number (e.g. 500.50)
 3. "merchant" — payee name, cleaned up
 4. "type" — "expense" if debited/spent/paid, "income" if credited/received
-5. "accountLast4" — IMPORTANT: Extract ONLY the last 4 digits of the account or card number (e.g., if text says 'A/c XX1234', return '1234'). If not present, return null.
+5. "accountLast4" — Extract ONLY the last 4 digits of the account or card number. Some cards (e.g. AMEX) show 5 digits like '** 51005' — you MUST return only the last 4: '1005', NOT '5100'. For 'XX1234' return '1234'. If not present, return null.
 6. "date" — ISO 8601 date string if explicitly mentioned in text
 7. "categoryId" — Use the provided "Existing User Categories". If the merchant fits cleanly into one, return its ID. If NOT, leave it null.
 8. "newCategory" — If "categoryId" is null, propose a new vibrant category object with: "name", "icon", "color", and "type" (matching the transaction type).
@@ -160,7 +160,7 @@ ${messagesBlock}
           type: item.type === "income" ? "income" : "expense",
           merchant: item.merchant || "Bank Transaction",
           date: item.date || new Date().toISOString().split("T")[0],
-          accountLast4: item.accountLast4 || undefined,
+          accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
           confidence: 0.80,
           categoryId: item.categoryId || undefined,
           newCategory: item.newCategory || undefined,

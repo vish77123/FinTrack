@@ -247,7 +247,7 @@ For EACH SMS, extract:
      the SMS says 'payment received', 'payment processed', or 'bill payment' on a
      credit card. This is NOT income — it is debt reduction on the card balance.
    - "transfer": money moved between two bank/savings accounts (no CC involved)
-5. "accountLast4" — 4-digit account/card reference if present
+5. "accountLast4" — Extract ONLY the last 4 digits of the account/card number. Some cards (e.g. AMEX) show 5 digits like '** 51005' — return only the last 4: '1005', NOT '5100'. For 'XX1234' return '1234'.
 6. "date" — ISO 8601 date string if explicitly mentioned in text
 7. "categoryId" — Use the provided "Existing User Categories". If the merchant fits cleanly into one, return its ID. If NOT, leave it null.
 8. "newCategory" — If "categoryId" is null, propose a new vibrant category object with:
@@ -331,7 +331,7 @@ ${messagesBlock}
           type: ["income", "expense", "cc_payment", "transfer"].includes(item.type) ? item.type : "expense",
           merchant: item.merchant || (item.type === "cc_payment" ? "Credit Card Payment" : "Bank Transaction"),
           date: item.date || new Date().toISOString().split("T")[0],
-          accountLast4: item.accountLast4 || undefined,
+          accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
           confidence: 0.80,
           categoryId: item.categoryId || undefined,
           newCategory: item.newCategory || undefined,

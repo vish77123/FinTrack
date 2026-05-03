@@ -54,16 +54,18 @@ function parseAmount(raw: string): number {
 // ACCOUNT LAST-4 EXTRACTION
 // ═══════════════════════════════════════════════════════════
 
-function extractLast4(text: string): string {
+export function extractLast4(text: string): string {
   // "from account 6842" or "from account XX6842" or "a/c *6842"
+  // AMEX cards show 5 digits (e.g., "** 51005") — we capture all digits
+  // after the mask and take only the last 4.
   const patterns = [
-    /(?:a\/c|acct?|account|card)\s*(?:no\.?\s*)?(?:ending\s*)?(?:XX|xx|\*{2,})?\s*(\d{4})\b/i,
-    /(?:XX|xx|X{2,}|x{2,}|\*{2,})(\d{4})\b/,
-    /(?:debited from|credited to)\s*(?:account|a\/c)?\s*(\d{4})\b/i,
+    /(?:a\/c|acct?|account|card)\s*(?:no\.?\s*)?(?:ending\s*)?(?:XX|xx|\*{2,})?\s*(\d{4,})\b/i,
+    /(?:XX|xx|X{2,}|x{2,}|\*{2,})\s*(\d{4,})\b/,
+    /(?:debited from|credited to)\s*(?:account|a\/c)?\s*(\d{4,})\b/i,
   ];
   for (const p of patterns) {
     const m = text.match(p);
-    if (m) return m[1];
+    if (m) return m[1].slice(-4); // Always return last 4 digits
   }
   return "";
 }

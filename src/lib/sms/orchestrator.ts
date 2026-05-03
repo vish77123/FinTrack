@@ -5,7 +5,7 @@
  * Mirrors the gmail.ts sync pipeline but for SMS messages.
  */
 
-import { parseTransactionText } from "@/lib/email/parser";
+import { parseTransactionText, extractLast4 } from "@/lib/email/parser";
 import { parseSmsWithLLM } from "./llmParser";
 import { parseSmsWithNvidia } from "./nvidiaParser";
 
@@ -111,13 +111,19 @@ export async function parseSmsToTransaction(
 
     const llmResult = llmMap.get(sms.id);
     if (llmResult) {
+      const regexLast4 = extractLast4(sms.body);
+      const llmLast4 = llmResult.accountLast4 ? llmResult.accountLast4.slice(-4) : "";
+      const finalLast4 = regexLast4 || llmLast4;
       console.log(`[SMS-ORCH] ✓ LLM matched: Rs.${llmResult.amount} ${llmResult.type} via ${parsedBy}`);
+      console.log(`[SMS-ORCH] last4 override: LLM="${llmResult.accountLast4}" → regex="${regexLast4}" → final="${finalLast4}"`);
       return {
         amount: llmResult.amount,
         type: llmResult.type,
         merchant: llmResult.merchant || "Bank Transaction",
         date: llmResult.date || sms.received_at,
-        last4: llmResult.accountLast4 || "",
+        // Always prefer regex extraction from raw text over LLM's value
+        // (LLMs often get AMEX 5-digit card numbers wrong, e.g. '5100' instead of '1005')
+        last4: finalLast4,
         confidence: llmResult.confidence,
         rawSnippet: sms.body.slice(0, 200),
         parsedBy,
