@@ -25,28 +25,25 @@ import type {
 } from "@/lib/zerodha/types";
 
 async function getCredentials(): Promise<ZerodhaCredentials | null> {
-  // 1. Try DB (set by the OAuth callback)
+  // Credentials are stored per-user in zerodha_credentials (RLS: auth.uid() = user_id).
+  // No env-var fallback — that would expose one user's portfolio to all logged-in users.
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase
-        .from("zerodha_credentials")
-        .select("api_key, access_token")
-        .eq("user_id", user.id)
-        .single();
-      if (data?.api_key && data?.access_token) {
-        return { apiKey: data.api_key, accessToken: data.access_token };
-      }
+    if (!user) return null;
+
+    const { data } = await supabase
+      .from("zerodha_credentials")
+      .select("api_key, access_token")
+      .eq("user_id", user.id)
+      .single();
+
+    if (data?.api_key && data?.access_token) {
+      return { apiKey: data.api_key, accessToken: data.access_token };
     }
   } catch {
-    // Table may not exist yet (migration not applied) — fall through
+    // Table may not exist yet (migration not applied)
   }
-
-  // 2. Try env vars (manual daily paste)
-  const apiKey = process.env.ZERODHA_API_KEY;
-  const accessToken = process.env.ZERODHA_ACCESS_TOKEN;
-  if (apiKey && accessToken) return { apiKey, accessToken };
 
   return null;
 }

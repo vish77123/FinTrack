@@ -1,3 +1,4 @@
+/* ==================== HEADER ==================== */
 .pageHeader {
   display: flex;
   justify-content: space-between;
@@ -31,17 +32,18 @@
 }
 
 .sourceBadgeLive {
-  background: rgba(16, 185, 129, 0.12);
-  color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.35);
 }
 
 .sourceBadgeMock {
   background: rgba(245, 158, 11, 0.12);
-  color: #b45309;
+  color: #f59e0b;
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
+/* ==================== BANNERS ==================== */
 .banner {
   background: rgba(245, 158, 11, 0.08);
   border: 1px solid rgba(245, 158, 11, 0.25);
@@ -71,7 +73,7 @@
 .connectLink {
   display: inline-block;
   margin-top: 6px;
-  color: #2563eb;
+  color: #3b82f6;
   font-weight: 600;
   text-decoration: none;
   font-size: 13px;
@@ -81,11 +83,12 @@
   text-decoration: underline;
 }
 
+/* ==================== SUMMARY GRID ==================== */
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 
 .summaryCard {
@@ -96,9 +99,9 @@
 }
 
 .summaryLabel {
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
   font-weight: 600;
   margin-bottom: 8px;
@@ -109,36 +112,181 @@
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
 .summarySub {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.summarySubSmall {
+  margin-top: 4px;
+  font-size: 12px;
   font-weight: 500;
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
+/* Brighter, more accessible green/red on dark theme */
 .positive {
-  color: #059669;
+  color: #22c55e;
 }
 
 .negative {
-  color: #dc2626;
+  color: #ef4444;
 }
 
 .neutral {
   color: var(--text-secondary);
 }
 
+/* ==================== INSIGHTS ROW (donut + movers) ==================== */
+.insightsRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 900px) {
+  .insightsRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+.allocationCard,
+.moversCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.donutWrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.donutChart {
+  width: 150px;
+  height: 150px;
+  flex-shrink: 0;
+}
+
+.donutLegend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.legendLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.legendDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legendName {
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legendValue {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .donutWrap {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .donutChart {
+    width: 100%;
+    height: 160px;
+    margin: 0 auto;
+  }
+}
+
+/* ==================== TOP MOVERS ==================== */
+.moversList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.moverPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid;
+}
+
+.moverUp {
+  background: rgba(34, 197, 94, 0.10);
+  border-color: rgba(34, 197, 94, 0.30);
+  color: #22c55e;
+}
+
+.moverDown {
+  background: rgba(239, 68, 68, 0.10);
+  border-color: rgba(239, 68, 68, 0.30);
+  color: #ef4444;
+}
+
+.moverSym {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.moverPct {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==================== TABS ==================== */
 .tabs {
   display: inline-flex;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 4px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .tab {
@@ -163,6 +311,83 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
+/* ==================== FILTERS BAR ==================== */
+.filtersBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.searchWrap {
+  position: relative;
+  flex: 0 1 240px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 8px 12px 8px 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.searchInput:focus {
+  border-color: var(--accent, #8b5cf6);
+}
+
+.searchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chip:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.chipActive {
+  background: var(--accent, #8b5cf6);
+  border-color: var(--accent, #8b5cf6);
+  color: #fff;
+}
+
+.chipActive:hover {
+  color: #fff;
+}
+
+/* ==================== TABLE ==================== */
 .tableWrap {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -238,17 +463,124 @@
   font-variant-numeric: tabular-nums;
 }
 
+.subPct {
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 2px;
+  opacity: 0.85;
+}
+
 .emptyState {
   padding: 48px 16px;
   text-align: center;
   color: var(--text-secondary);
 }
 
+/* ==================== SORTABLE HEADERS ==================== */
+.sortableTh {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.sortableTh:hover {
+  color: var(--text-primary) !important;
+}
+
+.sortHeaderInner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sortIcon {
+  font-size: 9px;
+  opacity: 0.4;
+}
+
+.sortIconActive {
+  opacity: 1;
+  color: var(--accent, #8b5cf6);
+}
+
+/* ==================== MOBILE CARD LAYOUT ==================== */
+.desktopOnly {
+  display: block;
+}
+
+.mobileOnly {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .desktopOnly {
+    display: none;
+  }
+  .mobileOnly {
+    display: block;
+  }
+}
+
+.cardList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.holdingCard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  gap: 12px;
+}
+
+.holdingCardLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.holdingCardRight {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.holdingCardCurrent {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.holdingCardPnl {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==================== RESPONSIVE TUNING ==================== */
 @media (max-width: 600px) {
   .pageHeader h1 {
     font-size: 22px;
   }
   .summaryValue {
     font-size: 20px;
+  }
+  .summaryGrid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .summaryCard {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 400px) {
+  .summaryGrid {
+    grid-template-columns: 1fr;
   }
 }
