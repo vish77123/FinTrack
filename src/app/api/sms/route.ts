@@ -187,17 +187,15 @@ export async function POST(request: Request) {
         }
       }
 
-      // ── Convert cc_payment → transfer for DB insert ─────
-      const insertType = parsed.type === "cc_payment" ? "transfer" : parsed.type;
-
       // ── Insert pending transaction ──────────────────────
+      // Keep cc_payment type in pending (consistent with gmail.ts); converted to transfer on approval.
       const { error: insertError } = await supabase
         .from("pending_transactions")
         .insert({
           user_id: userId,
           account_id: matchedAccountId,
           category_id: finalCategoryId,
-          type: insertType,
+          type: parsed.type,
           amount: parsed.amount,
           date: parsed.date,
           note: parsed.merchant,

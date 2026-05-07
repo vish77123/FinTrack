@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import { parseTransactionText, isBankSender } from "@/lib/email/parser";
+import { parseTransactionText, isBankSender, KNOWN_BANK_SENDERS } from "@/lib/email/parser";
 import { parseBatchWithLLM } from "@/lib/email/llmParser";
 import { parseBatchWithNvidia } from "@/lib/email/nvidiaParser";
 // Local balance-update helper — mirrors the one in transactions.ts.
@@ -238,28 +238,32 @@ export async function syncGmailAction() {
   const merchantRules = rules || [];
 
   // Fetch bank alert emails from Gmail (last 3 days)
+  // Query targets only known bank senders — avoids fetching marketing/noreply noise.
   const threeDaysAgo = Math.floor((Date.now() - 3 * 86400000) / 1000);
-  const query = `(from:alerts OR from:noreply OR subject:transaction OR subject:debited OR subject:credited) after:${threeDaysAgo}`;
+  const senderFilter = KNOWN_BANK_SENDERS.map(s => `from:${s}`).join(" OR ");
+  const query = `(${senderFilter}) after:${threeDaysAgo}`;
 
-  let messages: any[] = [];
+  const messages: any[] = [];
   try {
-    const listRes = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=20`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+    let pageToken: string | undefined;
+    do {
+      const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50${pageToken ? `&pageToken=${pageToken}` : ""}`;
+      const listRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
 
-    if (listRes.status === 401) {
-      return { error: "Gmail token expired or revoked. Please sign in with Google again." };
-    }
+      if (listRes.status === 401) {
+        return { error: "Gmail token expired or revoked. Please sign in with Google again." };
+      }
 
-    if (!listRes.ok) {
-      const errText = await listRes.text();
-      console.error("Gmail list error:", errText);
-      return { error: "Failed to fetch emails from Gmail." };
-    }
+      if (!listRes.ok) {
+        const errText = await listRes.text();
+        console.error("Gmail list error:", errText);
+        return { error: "Failed to fetch emails from Gmail." };
+      }
 
-    const listData = await listRes.json();
-    messages = listData.messages || [];
+      const listData = await listRes.json();
+      messages.push(...(listData.messages || []));
+      pageToken = listData.nextPageToken;
+    } while (pageToken && messages.length < 200);
   } catch (err) {
     console.error("Gmail fetch error:", err);
     return { error: "Failed to connect to Gmail." };
@@ -270,7 +274,7 @@ export async function syncGmailAction() {
   let newCount = 0;
   let skippedCount = 0;
 
-  // ── PHASE 1: Fetch all emails and try regex ──────────
+  // ── PHASE 1: Batch dedup → parallel message fetch → regex ──────────
   interface EmailData {
     msgId: string;
     from: string;
@@ -282,103 +286,89 @@ export async function syncGmailAction() {
 
   const emailsToProcess: EmailData[] = [];
 
-  for (const msg of messages) {
-    // Dedup: skip if already pending or approved
-    const { data: existingPending } = await supabase
-      .from("pending_transactions")
-      .select("id")
-      .eq("source_email_id", msg.id)
-      .eq("user_id", user.id)
-      .in("status", ["pending", "approved"])
-      .maybeSingle();
+  // Single batch dedup query instead of N individual queries
+  const allMsgIds = messages.map((m: any) => m.id as string);
+  if (allMsgIds.length > 0) {
+    const [{ data: existingPendingRows }, { data: existingTxnRows }] = await Promise.all([
+      supabase
+        .from("pending_transactions")
+        .select("source_email_id")
+        .in("source_email_id", allMsgIds)
+        .eq("user_id", user.id)
+        .in("status", ["pending", "approved"]),
+      supabase
+        .from("transactions")
+        .select("source_email_id")
+        .in("source_email_id", allMsgIds)
+        .eq("user_id", user.id),
+    ]);
+    const skipSet = new Set<string>();
+    for (const r of existingPendingRows ?? []) if (r.source_email_id) skipSet.add(r.source_email_id);
+    for (const r of existingTxnRows ?? []) if (r.source_email_id) skipSet.add(r.source_email_id);
 
-    if (existingPending) {
-      skippedCount++;
-      continue;
+    const messagesToFetch = messages.filter((m: any) => !skipSet.has(m.id));
+    skippedCount = messages.length - messagesToFetch.length;
+    console.log(`[SYNC] ${messagesToFetch.length} emails to fetch (${skippedCount} dupes skipped)`);
+
+    // Fetch all non-dupe message bodies in parallel
+    const fetchedMessages = await Promise.all(
+      messagesToFetch.map(async (msg: any) => {
+        try {
+          const msgRes = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (!msgRes.ok) return null;
+          return { msgId: msg.id as string, data: await msgRes.json() };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    for (const fetched of fetchedMessages) {
+      if (!fetched) continue;
+      const { msgId, data: messageData } = fetched;
+
+      const headers = messageData.payload?.headers || [];
+      const from = headers.find((h: any) => h.name.toLowerCase() === "from")?.value || "";
+      const subject = headers.find((h: any) => h.name.toLowerCase() === "subject")?.value || "";
+      const dateHeader = headers.find((h: any) => h.name.toLowerCase() === "date")?.value || "";
+
+      if (!isBankSender(from)) {
+        console.log(`[SYNC] Skipping non-bank sender: ${from.slice(0, 50)}`);
+        continue;
+      }
+
+      let bodyText = "";
+      const payload = messageData.payload;
+
+      if (payload?.body?.data) {
+        bodyText = Buffer.from(payload.body.data, "base64url").toString("utf8");
+      }
+      if (!bodyText && payload?.parts) {
+        bodyText = extractBodyFromParts(payload.parts);
+      }
+      if (!bodyText && messageData.snippet) {
+        bodyText = messageData.snippet;
+      }
+      if (!bodyText && subject) bodyText = subject;
+      if (!bodyText) continue;
+
+      const fullText = `${subject} ${bodyText}`;
+      const emailDate = dateHeader ? new Date(dateHeader).toISOString() : new Date().toISOString();
+
+      console.log(`[SYNC] Email from: ${from.slice(0, 40)}`);
+      console.log(`[SYNC] Subject: ${subject.slice(0, 60)}`);
+      console.log(`[SYNC] Body (first 200): ${bodyText.slice(0, 200)}`);
+
+      let regexResult = null;
+      if (regexEnabled) {
+        regexResult = parseTransactionText(fullText, emailDate);
+      }
+
+      emailsToProcess.push({ msgId, from, subject, fullText, emailDate, regexResult });
     }
-
-    // Dedup: check main transactions table.
-    // Also covers split children — when a synced txn is converted to a split,
-    // the first split child inherits source_email_id, so this check still fires.
-    const { data: existingTxns } = await supabase
-      .from("transactions")
-      .select("id")
-      .eq("source_email_id", msg.id)
-      .eq("user_id", user.id)
-      .limit(1);
-
-    if (existingTxns && existingTxns.length > 0) {
-      skippedCount++;
-      continue;
-    }
-
-    // Fetch full message
-    let messageData: any;
-    try {
-      const msgRes = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      if (!msgRes.ok) continue;
-      messageData = await msgRes.json();
-    } catch {
-      continue;
-    }
-
-    // Extract headers
-    const headers = messageData.payload?.headers || [];
-    const from = headers.find((h: any) => h.name.toLowerCase() === "from")?.value || "";
-    const subject = headers.find((h: any) => h.name.toLowerCase() === "subject")?.value || "";
-    const dateHeader = headers.find((h: any) => h.name.toLowerCase() === "date")?.value || "";
-
-    // Check if from a bank
-    if (!isBankSender(from)) {
-      console.log(`[SYNC] Skipping non-bank sender: ${from.slice(0, 50)}`);
-      continue;
-    }
-
-    // Extract body — with proper nested MIME handling
-    let bodyText = "";
-    const payload = messageData.payload;
-
-    // Method 1: body.data directly on payload
-    if (payload?.body?.data) {
-      bodyText = Buffer.from(payload.body.data, "base64url").toString("utf8");
-    }
-    // Method 2: nested parts (most common for HTML emails)
-    if (!bodyText && payload?.parts) {
-      bodyText = extractBodyFromParts(payload.parts);
-    }
-    // Method 3: Gmail's own snippet (always available, plain text, ~150 chars)
-    if (!bodyText && messageData.snippet) {
-      bodyText = messageData.snippet;
-    }
-    // Method 4: subject as last resort
-    if (!bodyText && subject) bodyText = subject;
-    if (!bodyText) continue;
-
-    const fullText = `${subject} ${bodyText}`;
-    const emailDate = dateHeader ? new Date(dateHeader).toISOString() : new Date().toISOString();
-
-    // DEBUG: log what text the parser actually receives
-    console.log(`[SYNC] Email from: ${from.slice(0, 40)}`);
-    console.log(`[SYNC] Subject: ${subject.slice(0, 60)}`);
-    console.log(`[SYNC] Body (first 200): ${bodyText.slice(0, 200)}`);
-
-    // Try regex first
-    let regexResult = null;
-    if (regexEnabled) {
-      regexResult = parseTransactionText(fullText, emailDate);
-    }
-
-    emailsToProcess.push({
-      msgId: msg.id,
-      from,
-      subject,
-      fullText,
-      emailDate,
-      regexResult,
-    });
   }
 
   console.log(`[SYNC] ${emailsToProcess.length} emails passed filters (${skippedCount} skipped as dupes)`);
@@ -391,7 +381,7 @@ export async function syncGmailAction() {
     console.log(`[SYNC] ${regexFailures.length} regex failures → sending to AI Parsers`);
     const emailsForLLM = regexFailures.map(e => ({
       id: e.msgId,
-      text: e.fullText.slice(0, 400),
+      text: e.fullText.slice(0, 600),
     }));
 
     const config = {
@@ -417,6 +407,8 @@ export async function syncGmailAction() {
 
   // cache for categories created in this run
   const newCategoriesCache = new Map<string, string>(); // name lower to id
+  const MAX_NEW_CATEGORIES_PER_SYNC = 5;
+  let newCategoriesCreated = 0;
 
   // ── PHASE 3: Save results ──────────────────────────
   for (const email of emailsToProcess) {
@@ -503,7 +495,7 @@ export async function syncGmailAction() {
       finalCategoryId = localMatchedCategory;
     } else if (finalCategoryId) {
       // LLM successfully matched an existing category, leave it.
-    } else if (fallbackNewCategory) {
+    } else if (fallbackNewCategory && newCategoriesCreated < MAX_NEW_CATEGORIES_PER_SYNC) {
       // Create new category if it hasn't been created during this execution yet
       const catNameLower = fallbackNewCategory.name.toLowerCase();
       if (newCategoriesCache.has(catNameLower)) {
@@ -529,6 +521,7 @@ export async function syncGmailAction() {
         if (newCat) {
           finalCategoryId = newCat.id;
           newCategoriesCache.set(catNameLower, newCat.id);
+          newCategoriesCreated++;
         }
       }
     }
@@ -559,29 +552,15 @@ export async function syncGmailAction() {
           note: parsed.merchant,
           source_email_id: email.msgId,
           original_synced_name: originalMerchantName,
+          source: "email",
         });
 
       if (!txnError) {
-        if (matchedAccountId) {
-          const { data: account } = await supabase
-            .from("accounts")
-            .select("type, balance, outstanding_balance")
-            .eq("id", matchedAccountId)
-            .single();
-          if (account) {
-            if (account.type === "credit_card") {
-              // CC expense → increase outstanding; cc_payment → decrease outstanding
-              const delta = parsed.type === "expense" ? parsed.amount : -parsed.amount;
-              const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
-              await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", matchedAccountId);
-            } else {
-              const newBalance = parsed.type === "expense"
-                ? Number(account.balance) - parsed.amount
-                : Number(account.balance) + parsed.amount;
-              await supabase.from("accounts").update({ balance: newBalance }).eq("id", matchedAccountId);
-            }
-          }
-        }
+        await applyPendingBalanceUpdate(supabase, {
+          type: parsed.type,
+          amount: parsed.amount,
+          account_id: matchedAccountId,
+        });
         newCount++;
       }
     } else {
@@ -713,6 +692,7 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
 
   if (!pendingTxns || pendingTxns.length === 0) return { error: "Transactions not found." };
 
+  const successfulIds: string[] = [];
   for (const pending of pendingTxns) {
     const isCCPayment = pending.type === "cc_payment";
     const insertType = isCCPayment ? "transfer" : pending.type;
@@ -741,14 +721,17 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
         account_id: pending.account_id,
         transfer_to_account_id: pending.transfer_to_account_id || null,
       });
+      successfulIds.push(pending.id);
     }
   }
 
-  await supabase
-    .from("pending_transactions")
-    .delete()
-    .in("id", pendingIds)
-    .eq("user_id", user.id);
+  if (successfulIds.length > 0) {
+    await supabase
+      .from("pending_transactions")
+      .delete()
+      .in("id", successfulIds)
+      .eq("user_id", user.id);
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");

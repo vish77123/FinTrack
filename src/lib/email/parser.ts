@@ -344,5 +344,5 @@ export function parseTransactionText(text: string, emailDate?: string): ParsedTr
  */
 export function isBankSender(sender: string): boolean {
   const email = sender.toLowerCase().replace(/.*</, "").replace(/>.*/, "").trim();
-  return KNOWN_BANK_SENDERS.some(known => email.includes(known));
+  return KNOWN_BANK_SENDERS.some(known => email === known);
 }

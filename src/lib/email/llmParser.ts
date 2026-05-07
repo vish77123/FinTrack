@@ -209,7 +209,7 @@ function sanitize(text: string): string {
     .replace(/https?:\/\/\S+/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 300);
+    .slice(0, 500);
 }
 
 // ═══════════════════════════════════════════════════════════
