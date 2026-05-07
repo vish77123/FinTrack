@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   if (code) {
     const supabase = await createClient();
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    
+
     if (!error && data.session) {
       // If Google login, store the provider token for Gmail API access
       const providerToken = data.session.provider_token;
@@ -21,13 +21,22 @@ export async function GET(request: Request) {
         const expiresAt = new Date(Date.now() + 3600 * 1000).toISOString();
         const email = user.email || "";
 
+        // Fetch existing token so we don't overwrite a valid refresh_token with null
+        const { data: existingToken } = await supabase
+          .from("gmail_tokens")
+          .select("refresh_token")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        const finalRefreshToken = providerRefreshToken || existingToken?.refresh_token || null;
+
         // Upsert gmail_tokens
         await supabase
           .from("gmail_tokens")
           .upsert({
             user_id: user.id,
             access_token: providerToken,
-            refresh_token: providerRefreshToken || null,
+            refresh_token: finalRefreshToken,
             expires_at: expiresAt,
             email,
           }, { onConflict: "user_id" });

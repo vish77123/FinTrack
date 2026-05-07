@@ -174,14 +174,14 @@ export async function syncGmailAction() {
 
   // Check if token is expired or expiring within 5 minutes
   const isExpired = tokenRow.expires_at ? new Date(tokenRow.expires_at).getTime() < Date.now() + 5 * 60 * 1000 : false;
-  
+
   if (isExpired && tokenRow.refresh_token) {
     console.log("[SYNC] Token is expired. Attempting to refresh...");
     const refreshed = await refreshGoogleToken(tokenRow.refresh_token);
     if (refreshed && refreshed.access_token) {
       accessToken = refreshed.access_token;
       const newExpiresAt = new Date(Date.now() + (refreshed.expires_in * 1000 || 3600 * 1000)).toISOString();
-      
+
       // Save new token to db
       await supabase
         .from("gmail_tokens")
@@ -190,7 +190,7 @@ export async function syncGmailAction() {
           expires_at: newExpiresAt,
         })
         .eq("user_id", user.id);
-      
+
       console.log("[SYNC] Token refreshed successfully.");
     } else {
       console.log("[SYNC] Token refresh failed. The user needs to sign in again.");
@@ -456,10 +456,10 @@ export async function syncGmailAction() {
     if (parsed.date && email.emailDate) {
       const parsedDateObj = new Date(parsed.date);
       const emailDateObj = new Date(email.emailDate);
-      
+
       const diffTime = Math.abs(emailDateObj.getTime() - parsedDateObj.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
+
       // If parsing resulted in a date > 14 days away from the email's arrival, fallback to email date
       if (diffDays > 14) {
         console.log(`[SYNC] Date hallucination detected (diff: ${diffDays} days). Parsed: ${parsed.date}, Email: ${email.emailDate}. Falling back to email date.`);
@@ -489,7 +489,7 @@ export async function syncGmailAction() {
       const merchantLower = parsed.merchant.toLowerCase();
       let match = historicalMappings.find(h => h.note?.toLowerCase() === merchantLower);
       if (!match) {
-        match = historicalMappings.find(h => 
+        match = historicalMappings.find(h =>
           h.note && (h.note.toLowerCase().includes(merchantLower) || merchantLower.includes(h.note.toLowerCase()))
         );
       }
@@ -525,7 +525,7 @@ export async function syncGmailAction() {
           })
           .select("id")
           .single();
-        
+
         if (newCat) {
           finalCategoryId = newCat.id;
           newCategoriesCache.set(catNameLower, newCat.id);
