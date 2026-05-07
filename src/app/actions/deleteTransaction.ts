@@ -29,7 +29,17 @@ export async function deleteTransactionAction(transactionId: string) {
     return { error: "Transaction not found." };
   }
 
-  // 2. Delete the transaction
+  // 2. Reverse balance first — if the subsequent delete fails the transaction is still
+  //    visible and the user can retry. Reversing after delete risks a deleted row with
+  //    no balance correction if the reverse call errors.
+  await reverseBalanceUpdate(supabase, {
+    type: txn.type,
+    amount: Number(txn.amount),
+    account_id: txn.account_id,
+    transfer_to_account_id: txn.transfer_to_account_id,
+  });
+
+  // 3. Delete the transaction
   const { error: deleteError } = await supabase
     .from("transactions")
     .delete()
@@ -40,14 +50,6 @@ export async function deleteTransactionAction(transactionId: string) {
     console.error("Failed to delete transaction:", deleteError);
     return { error: "Could not remove transaction. Try again." };
   }
-
-  // 3. Reverse balance using CC-aware logic
-  await reverseBalanceUpdate(supabase, {
-    type: txn.type,
-    amount: Number(txn.amount),
-    account_id: txn.account_id,
-    transfer_to_account_id: txn.transfer_to_account_id,
-  });
 
   // Once safely deleted and balance adjusted, clear the caches
   revalidatePath("/dashboard");

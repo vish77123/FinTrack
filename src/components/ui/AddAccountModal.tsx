@@ -192,7 +192,7 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
                   type="number"
                   min={1}
                   max={28}
-                  placeholder="e.g. 15"
+                  placeholder="e.g. 12"
                   className={styles.formInput}
                   value={statementDay}
                   onChange={(e) => setStatementDay(e.target.value)}
@@ -203,8 +203,8 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
                 <input
                   type="number"
                   min={1}
-                  max={28}
-                  placeholder="e.g. 5"
+                  max={31}
+                  placeholder="e.g. 27"
                   className={styles.formInput}
                   value={dueDay}
                   onChange={(e) => setDueDay(e.target.value)}

@@ -296,19 +296,19 @@ export function EditAccountModal({ isOpen, onClose, account, alertProfile }: Edi
                 type="number"
                 min={1}
                 max={28}
-                placeholder="e.g. 15"
+                placeholder="e.g. 12"
                 className={styles.formInput}
                 value={statementDay}
                 onChange={(e) => setStatementDay(e.target.value)}
               />
             </div>
             <div className={styles.formGroup} style={{ flex: 1 }}>
-              <label className={styles.inputLabel}>Payment Due Date <span style={{ color: "var(--text-tertiary)", fontWeight: 400, fontSize: "11px" }}>(1–28)</span></label>
+              <label className={styles.inputLabel}>Payment Due Date <span style={{ color: "var(--text-tertiary)", fontWeight: 400, fontSize: "11px" }}>(1–31)</span></label>
               <input
                 type="number"
                 min={1}
-                max={28}
-                placeholder="e.g. 5"
+                max={31}
+                placeholder="e.g. 27"
                 className={styles.formInput}
                 value={dueDay}
                 onChange={(e) => setDueDay(e.target.value)}

@@ -81,8 +81,9 @@ async function applyBalanceUpdate(supabase: any, payload: any) {
 
       if (toAccount) {
         if (toAccount.type === "credit_card") {
-          // Bill payment: reduce outstanding debt
-          const newOutstanding = Math.max(0, (Number(toAccount.outstanding_balance) || 0) - amount);
+          // Bill payment: reduce outstanding debt. No floor — overpayment is stored as a
+          // negative outstanding (credit balance) so that reversal can add the exact amount back.
+          const newOutstanding = (Number(toAccount.outstanding_balance) || 0) - amount;
           await supabase
             .from("accounts")
             .update({ outstanding_balance: newOutstanding })

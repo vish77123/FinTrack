@@ -34,14 +34,15 @@ function getCycleStartDate(statementDay: number | null): Date | null {
 function enrichCCAccount(acc: any, allTransactions: any[] = []) {
   if (acc.type !== "credit_card") return acc;
 
-  const outstanding     = Number(acc.outstanding_balance) || 0;
+  // Raw value preserves overpayment credit balances (stored as negative outstanding so
+  // that reversal is symmetric). Clamped value is what we show in the UI.
+  const rawOutstanding  = Number(acc.outstanding_balance) || 0;
+  const outstanding     = Math.max(0, rawOutstanding);
   const limit           = Number(acc.credit_limit) || 0;
   const availableCredit = limit > 0 ? Math.max(0, limit - outstanding) : null;
   const utilizationPct  = limit > 0 ? Math.round(((outstanding / limit) * 100) * 10) / 10 : null;
 
-  // ── Due date: simply find the next calendar occurrence of due_day ───
-  // The due date is independent of billing cycle.
-  // "When is my next payment due?" = the next due_day on the calendar.
+  // ── Due date: next calendar occurrence of due_day ───────────────
   let daysUntilDue: number | null = null;
   let nextDueDateStr: string | null = null;
 
@@ -57,13 +58,18 @@ function enrichCCAccount(acc: any, allTransactions: any[] = []) {
 
     daysUntilDue = Math.ceil((nextDue.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     nextDueDateStr = nextDue.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-
   }
 
   // ── Billing breakdown: Current Due vs Unbilled ────────────
-  // unbilled     = charges since the last statement closed (new cycle)
-  // currentDue   = outstanding - unbilled (what’s on the last statement)
-  // currentDuePaid = true when currentDue <= 0 (user paid the bill)
+  // Standard CC model:
+  //   - Charges between statements accumulate as `unbilled`.
+  //   - On statement_day, that snapshot becomes `currentDue` (frozen until paid).
+  //   - Post-statement charges go into the next cycle's `unbilled`.
+  //   - Payments reduce `currentDue` first; any excess overflows to `unbilled`.
+  //
+  // We don't store a statement-balance snapshot, so we reconstruct it from the
+  // accounting identity:
+  //   outstanding(now) = statementBalance + cycleExpenses − cycleCredits − cyclePayments
   const cycleStart = getCycleStartDate(acc.statement_day ? Number(acc.statement_day) : null);
 
   let unbilled = 0;
@@ -71,16 +77,36 @@ function enrichCCAccount(acc: any, allTransactions: any[] = []) {
   let currentDuePaid = false;
 
   if (cycleStart && allTransactions.length > 0) {
-    unbilled = allTransactions
-      .filter(t =>
-        t.account_id === acc.id &&
-        t.type === "expense" &&
-        new Date(t.date) >= cycleStart
-      )
+    const inCycle = (t: any) => new Date(t.date) >= cycleStart!;
+
+    // Charges = expenses + transfers FROM this CC (e.g. RAZORPAY GOV, flight splits).
+    // Both types increase outstanding_balance in applyBalanceUpdate, so both must be
+    // counted here to keep the statementBalance identity correct.
+    const cycleExpenses = allTransactions
+      .filter(t => t.account_id === acc.id && (t.type === "expense" || t.type === "transfer") && inCycle(t))
       .reduce((sum: number, t: any) => sum + Number(t.amount), 0);
 
-    currentDue = Math.max(0, outstanding - unbilled);
-    currentDuePaid = outstanding > 0 && currentDue <= 0;
+    // Refunds/cashback posted to the CC (income type with the CC as account_id).
+    const cycleCredits = allTransactions
+      .filter(t => t.account_id === acc.id && t.type === "income" && inCycle(t))
+      .reduce((sum: number, t: any) => sum + Number(t.amount), 0);
+
+    // Bill payments — transfers TO this CC from another account.
+    const cyclePayments = allTransactions
+      .filter(t => t.transfer_to_account_id === acc.id && t.type === "transfer" && inCycle(t))
+      .reduce((sum: number, t: any) => sum + Number(t.amount), 0);
+
+    const statementBalance = Math.max(
+      0,
+      rawOutstanding - cycleExpenses + cycleCredits + cyclePayments
+    );
+
+    const newCharges     = Math.max(0, cycleExpenses - cycleCredits);
+    const paymentsExcess = Math.max(0, cyclePayments - statementBalance);
+
+    currentDue     = Math.max(0, statementBalance - cyclePayments);
+    unbilled       = Math.max(0, newCharges - paymentsExcess);
+    currentDuePaid = statementBalance > 0 && cyclePayments >= statementBalance;
   }
 
   const minPaymentDue = currentDue > 0
@@ -178,16 +204,16 @@ export async function getDashboardData() {
     // A. Net Worth Calculation — P0 fix: CC outstanding is a liability
     const netWorth = accountsRaw.reduce((sum, acc) => {
       if (acc.type === "credit_card") {
-        // Subtract outstanding debt from net worth
-        return sum - (Number(acc.outstanding_balance) || 0);
+        // Clamp at 0: overpayment credit balances (negative outstanding) should not
+        // inflate net worth — they represent a pending refund, not a real asset.
+        return sum - Math.max(0, Number(acc.outstanding_balance) || 0);
       }
-      // All other account types are assets
       return sum + (Number(acc.balance) || 0);
     }, 0);
 
     // A0. Total CC Debt & count (for SummaryGrid card)
     const ccAccounts = accountsRaw.filter(acc => acc.type === "credit_card");
-    const totalCCDebt = ccAccounts.reduce((sum, acc) => sum + (Number(acc.outstanding_balance) || 0), 0);
+    const totalCCDebt = ccAccounts.reduce((sum, acc) => sum + Math.max(0, Number(acc.outstanding_balance) || 0), 0);
     const ccCardCount = ccAccounts.length;
 
     // A1. Today's Spent Calculation

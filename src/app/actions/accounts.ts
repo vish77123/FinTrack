@@ -12,7 +12,7 @@ const accountSchema = z.object({
   credit_limit: z.number().min(0).optional().nullable(),
   outstanding_balance: z.number().min(0).optional().nullable(),
   statement_day: z.number().int().min(1).max(28).optional().nullable(),
-  due_day: z.number().int().min(1).max(28).optional().nullable(),
+  due_day: z.number().int().min(1).max(31).optional().nullable(),
   min_payment_pct: z.number().min(1).max(100).optional().nullable(),
   interest_rate_apr: z.number().min(0).max(100).optional().nullable(),
 });
