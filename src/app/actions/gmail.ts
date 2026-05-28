@@ -116,13 +116,17 @@ function extractBodyFromParts(parts: any[]): string {
 // TOKEN REFRESH HELPER
 // ═══════════════════════════════════════════════════════════
 
-async function refreshGoogleToken(refreshToken: string) {
+type RefreshResult =
+  | { ok: true; accessToken: string; expiresIn: number; refreshToken?: string }
+  | { ok: false; reason: string; needsReauth: boolean };
+
+async function refreshGoogleToken(refreshToken: string): Promise<RefreshResult> {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
     console.error("[SYNC] Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables.");
-    return null;
+    return { ok: false, reason: "server_config_missing", needsReauth: false };
   }
 
   try {
@@ -137,16 +141,27 @@ async function refreshGoogleToken(refreshToken: string) {
       }),
     });
 
+    const data = await response.json().catch(() => ({} as any));
+
     if (!response.ok) {
-      const err = await response.text();
-      console.error("[SYNC] Failed to refresh token:", err);
-      return null;
+      // Google's error body distinguishes a genuinely dead token from a config problem.
+      // invalid_grant   → refresh token was revoked/expired → real re-auth needed.
+      // invalid_client  → the GOOGLE_CLIENT_ID/SECRET here don't match the client that
+      //                   minted this token (i.e. Supabase's Google provider) → config fix.
+      const reason = data?.error || `http_${response.status}`;
+      console.error("[SYNC] Failed to refresh token:", JSON.stringify(data));
+      return { ok: false, reason, needsReauth: reason === "invalid_grant" };
     }
 
-    return await response.json();
+    return {
+      ok: true,
+      accessToken: data.access_token,
+      expiresIn: Number(data.expires_in) || 3600,
+      refreshToken: data.refresh_token, // Google occasionally rotates the refresh token
+    };
   } catch (error) {
     console.error("[SYNC] Token refresh exception:", error);
-    return null;
+    return { ok: false, reason: "network_error", needsReauth: false };
   }
 }
 
@@ -178,26 +193,32 @@ export async function syncGmailAction() {
   if (isExpired && tokenRow.refresh_token) {
     console.log("[SYNC] Token is expired. Attempting to refresh...");
     const refreshed = await refreshGoogleToken(tokenRow.refresh_token);
-    if (refreshed && refreshed.access_token) {
-      accessToken = refreshed.access_token;
-      const newExpiresAt = new Date(Date.now() + (refreshed.expires_in * 1000 || 3600 * 1000)).toISOString();
+    if (refreshed.ok) {
+      accessToken = refreshed.accessToken;
+      const newExpiresAt = new Date(Date.now() + refreshed.expiresIn * 1000).toISOString();
 
-      // Save new token to db
+      // Save the new access token (and rotated refresh token, if Google sent one).
       await supabase
         .from("gmail_tokens")
         .update({
           access_token: accessToken,
           expires_at: newExpiresAt,
+          ...(refreshed.refreshToken ? { refresh_token: refreshed.refreshToken } : {}),
         })
         .eq("user_id", user.id);
 
       console.log("[SYNC] Token refreshed successfully.");
+    } else if (refreshed.needsReauth) {
+      console.log("[SYNC] Refresh token revoked/expired — re-auth required.");
+      return { error: "Google access was revoked or has expired. Please sign in with Google again." };
+    } else if (refreshed.reason === "server_config_missing") {
+      return { error: "Gmail sync is misconfigured: the server is missing Google credentials (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)." };
     } else {
-      console.log("[SYNC] Token refresh failed. The user needs to sign in again.");
-      return { error: "Gmail token expired and refresh failed. Please sign in with Google again." };
+      // invalid_client / http_xxx / network_error — not the user's fault, don't force a pointless re-login.
+      return { error: `Couldn't refresh Gmail access (${refreshed.reason}). The server's Google credentials likely don't match the ones used to sign in. Verify GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET match your Supabase Google provider, then try again.` };
     }
   } else if (isExpired && !tokenRow.refresh_token) {
-    return { error: "Gmail token expired. Please sign in with Google again." };
+    return { error: "Gmail isn't fully connected — no refresh token was saved, so background sync can't run. Please sign in with Google again to grant offline access." };
   }
 
   // Get sync settings
@@ -237,11 +258,12 @@ export async function syncGmailAction() {
     .eq("user_id", user.id);
   const merchantRules = rules || [];
 
-  // Fetch bank alert emails from Gmail (last 3 days)
+  // Fetch bank alert emails from Gmail over the user's configured lookback window.
   // Query targets only known bank senders — avoids fetching marketing/noreply noise.
-  const threeDaysAgo = Math.floor((Date.now() - 3 * 86400000) / 1000);
+  const lookbackDays = Math.min(30, Math.max(1, settings?.sync_lookback_days ?? 3));
+  const afterTs = Math.floor((Date.now() - lookbackDays * 86400000) / 1000);
   const senderFilter = KNOWN_BANK_SENDERS.map(s => `from:${s}`).join(" OR ");
-  const query = `(${senderFilter}) after:${threeDaysAgo}`;
+  const query = `(${senderFilter}) after:${afterTs}`;
 
   const messages: any[] = [];
   try {
@@ -405,8 +427,14 @@ export async function syncGmailAction() {
     }
   }
 
-  // cache for categories created in this run
-  const newCategoriesCache = new Map<string, string>(); // name lower to id
+  // Cache of category name (lowercased) → id. Seed it with the user's EXISTING
+  // categories so the LLM-fallback path reuses them instead of creating duplicates
+  // (the LLM is unreliable at echoing back the matching categoryId). New names
+  // created during this run are added below so they're reused too.
+  const newCategoriesCache = new Map<string, string>();
+  for (const c of existingCategories || []) {
+    if (c.name) newCategoriesCache.set(c.name.toLowerCase(), c.id);
+  }
   const MAX_NEW_CATEGORIES_PER_SYNC = 5;
   let newCategoriesCreated = 0;
 
@@ -815,6 +843,9 @@ export async function updateEmailSyncSettingsAction(formData: FormData) {
     updates.regex_enabled = formData.get("regex_enabled") === "true";
     updates.llm_enabled = formData.get("llm_enabled") === "true";
     updates.sync_interval_minutes = parseInt(formData.get("sync_interval_minutes") as string) || 60;
+    if (formData.has("sync_lookback_days")) {
+      updates.sync_lookback_days = Math.min(30, Math.max(1, parseInt(formData.get("sync_lookback_days") as string) || 3));
+    }
   }
 
   await supabase

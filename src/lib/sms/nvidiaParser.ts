@@ -150,12 +150,23 @@ ${messagesBlock}
     if (Array.isArray(parsedArray)) {
       console.log(`[SMS-NVIDIA] Parsed ${parsedArray.length} items:`);
 
-      for (const item of parsedArray) {
+      const knownIds = new Set(messages.map(m => m.id));
+
+      for (let i = 0; i < parsedArray.length; i++) {
+        const item = parsedArray[i];
         console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
 
-        if (!item.emailId || !item.amount || Number(item.amount) <= 0) continue;
+        if (!item.amount || Number(item.amount) <= 0) continue;
 
-        results.set(item.emailId, {
+        // Resolve the map key: use the model's emailId if it matches a known input ID,
+        // otherwise fall back to the positional input ID (models often misquote UUIDs).
+        const mapKey = knownIds.has(item.emailId)
+          ? item.emailId
+          : (messages[i]?.id ?? item.emailId);
+
+        if (!mapKey) continue;
+
+        results.set(mapKey, {
           amount: Number(item.amount),
           type: item.type === "income" ? "income" : "expense",
           merchant: item.merchant || "Bank Transaction",

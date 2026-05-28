@@ -72,6 +72,7 @@ export function SettingsClient() {
   const [regexEnabled, setRegexEnabled] = useState(true);
   const [llmEnabled, setLlmEnabled] = useState(false);
   const [syncInterval, setSyncInterval] = useState(60);
+  const [syncLookbackDays, setSyncLookbackDays] = useState(3);
   const [aiProvider, setAiProvider] = useState<"gemini" | "nvidia">("gemini");
 
   // SMS forwarding state
@@ -98,6 +99,7 @@ export function SettingsClient() {
         setRegexEnabled(res.settings.regex_enabled ?? true);
         setLlmEnabled(res.settings.llm_enabled ?? false);
         setSyncInterval(res.settings.sync_interval_minutes ?? 60);
+        setSyncLookbackDays(res.settings.sync_lookback_days ?? 3);
         setAiProvider(res.settings.selected_llm_provider || "gemini");
       }
     });
@@ -519,6 +521,44 @@ export function SettingsClient() {
                     <option value={180}>Every 3 hours</option>
                     <option value={360}>Every 6 hours</option>
                     <option value={720}>Every 12 hours</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Sync History (lookback window) */}
+              <div className={styles.listItem}>
+                <div className={styles.itemLeft}>
+                  <div className={`${styles.iconWrap} ${styles.gray}`}><Clock size={18} /></div>
+                  <div className={styles.itemText}>
+                    <div className={styles.itemTitle}>Sync History</div>
+                    <div className={styles.itemSubtitle}>How far back to import emails on each sync</div>
+                  </div>
+                </div>
+                <div className={styles.itemRight}>
+                  <select
+                    value={syncLookbackDays}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setSyncLookbackDays(val);
+                      const fd = new FormData();
+                      fd.append("approval_required", String(approvalRequired));
+                      fd.append("regex_enabled", String(regexEnabled));
+                      fd.append("llm_enabled", String(llmEnabled));
+                      fd.append("sync_interval_minutes", String(syncInterval));
+                      fd.append("sync_lookback_days", String(val));
+                      startTransition(async () => { await updateEmailSyncSettingsAction(fd); });
+                    }}
+                    style={{
+                      padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--border)",
+                      background: "var(--surface)", fontSize: "13px", color: "var(--text-primary)",
+                      fontFamily: "inherit", cursor: "pointer"
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <option value={3}>Last 3 days</option>
+                    <option value={7}>Last 7 days</option>
+                    <option value={14}>Last 14 days</option>
+                    <option value={30}>Last 30 days</option>
                   </select>
                 </div>
               </div>

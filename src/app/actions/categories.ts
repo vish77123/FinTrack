@@ -47,6 +47,9 @@ export async function addCategoryAction(formData: FormData) {
 
   if (dbError) {
     console.error("Add category error:", dbError);
+    if (dbError.code === "23505") {
+      return { error: "A category with that name already exists." };
+    }
     return { error: "Failed to create category." };
   }
 
