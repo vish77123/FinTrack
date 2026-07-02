@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import { reverseBalanceUpdate } from "./transactions";
+import { reverseBalanceUpdate } from "@/lib/balance";
 
 export async function deleteTransactionAction(transactionId: string) {
   const supabase = await createClient();
@@ -16,46 +16,43 @@ export async function deleteTransactionAction(transactionId: string) {
     return { error: "Invalid transaction ID." };
   }
 
-  // 1. Fetch the transaction BEFORE deleting it — we need type, amount, account_id
-  const { data: txn, error: fetchError } = await supabase
-    .from("transactions")
-    .select("id, type, amount, account_id, transfer_to_account_id")
-    .eq("id", transactionId)
-    .eq("user_id", user.id)
-    .single();
-
-  if (fetchError || !txn) {
-    console.error("Failed to fetch transaction for deletion:", fetchError);
-    return { error: "Transaction not found." };
-  }
-
-  // 2. Reverse balance first — if the subsequent delete fails the transaction is still
-  //    visible and the user can retry. Reversing after delete risks a deleted row with
-  //    no balance correction if the reverse call errors.
-  await reverseBalanceUpdate(supabase, {
-    type: txn.type,
-    amount: Number(txn.amount),
-    account_id: txn.account_id,
-    transfer_to_account_id: txn.transfer_to_account_id,
-  });
-
-  // 3. Delete the transaction
-  const { error: deleteError } = await supabase
+  // Claim (delete) the row in one statement. delete().select() returns the
+  // deleted row, so a concurrent delete of the same transaction gets nothing
+  // back and cannot reverse the balance a second time.
+  const { data: txn, error: deleteError } = await supabase
     .from("transactions")
     .delete()
     .eq("id", transactionId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select("id, type, amount, account_id, transfer_to_account_id")
+    .maybeSingle();
 
   if (deleteError) {
     console.error("Failed to delete transaction:", deleteError);
     return { error: "Could not remove transaction. Try again." };
   }
 
+  if (!txn) {
+    return { error: "Transaction not found." };
+  }
+
+  // Reverse the balance effect (atomic, CC-aware)
+  const reverseResult = await reverseBalanceUpdate(supabase, {
+    type: txn.type,
+    amount: Number(txn.amount),
+    account_id: txn.account_id,
+    transfer_to_account_id: txn.transfer_to_account_id,
+  });
+
+  if (reverseResult.error) {
+    return { error: `Transaction removed, but reversing its balance effect failed (${reverseResult.error}). Please review your account balances.` };
+  }
+
   // Once safely deleted and balance adjusted, clear the caches
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
-  
+
   return { success: true };
 }
 
@@ -68,37 +65,35 @@ export async function deleteAllSplitSiblingsAction(splitGroupId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
-  // Fetch all siblings
-  const { data: siblings, error: fetchError } = await supabase
+  // Claim (delete) all siblings atomically — concurrent invocations get zero
+  // rows back and cannot double-reverse the balances.
+  const { data: siblings, error: deleteError } = await supabase
     .from("transactions")
-    .select("id, type, amount, account_id, transfer_to_account_id")
+    .delete()
     .eq("split_group_id", splitGroupId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select("id, type, amount, account_id, transfer_to_account_id");
 
-  if (fetchError || !siblings || siblings.length === 0) {
+  if (deleteError) {
+    console.error("deleteAllSplitSiblings error:", deleteError);
+    return { error: "Failed to delete split transactions." };
+  }
+
+  if (!siblings || siblings.length === 0) {
     return { error: "No split transactions found." };
   }
 
-  // Reverse balance effects for every sibling (CC-aware)
+  // Reverse balance effects for every sibling (atomic, CC-aware)
   for (const txn of siblings) {
-    await reverseBalanceUpdate(supabase, {
+    const reverseResult = await reverseBalanceUpdate(supabase, {
       type: txn.type,
       amount: Number(txn.amount),
       account_id: txn.account_id,
       transfer_to_account_id: txn.transfer_to_account_id,
     });
-  }
-
-  // Delete all sibling rows
-  const { error: deleteError } = await supabase
-    .from("transactions")
-    .delete()
-    .eq("split_group_id", splitGroupId)
-    .eq("user_id", user.id);
-
-  if (deleteError) {
-    console.error("deleteAllSplitSiblings error:", deleteError);
-    return { error: "Failed to delete split transactions." };
+    if (reverseResult.error) {
+      return { error: `Split rows removed, but reversing a balance effect failed (${reverseResult.error}). Please review your account balances.` };
+    }
   }
 
   revalidatePath("/dashboard");

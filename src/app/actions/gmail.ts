@@ -5,66 +5,10 @@ import { revalidatePath } from "next/cache";
 import { parseTransactionText, isBankSender, KNOWN_BANK_SENDERS } from "@/lib/email/parser";
 import { parseBatchWithLLM } from "@/lib/email/llmParser";
 import { parseBatchWithNvidia } from "@/lib/email/nvidiaParser";
-// Local balance-update helper — mirrors the one in transactions.ts.
-// We keep it inline here to avoid cross-"use server" module imports,
-// which can cause Next.js to fail loading the entire gmail actions module.
-async function applyPendingBalanceUpdate(
-  supabase: any,
-  payload: { type: string; amount: number; account_id: string | null; transfer_to_account_id?: string | null }
-) {
-  const amount = Number(payload.amount);
-
-  if (payload.type === "expense" || payload.type === "income" || payload.type === "cc_payment") {
-    if (!payload.account_id) return;
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("type, balance, outstanding_balance")
-      .eq("id", payload.account_id)
-      .single();
-    if (!account) return;
-    if (account.type === "credit_card") {
-      const delta = payload.type === "expense" ? amount : -amount;
-      const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
-      await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
-    } else {
-      const delta = payload.type === "income" ? amount : -amount;
-      await supabase.from("accounts").update({ balance: (Number(account.balance) || 0) + delta }).eq("id", payload.account_id);
-    }
-  } else if (payload.type === "transfer") {
-    // Debit source account
-    if (payload.account_id) {
-      const { data: fromAccount } = await supabase
-        .from("accounts")
-        .select("type, balance, outstanding_balance")
-        .eq("id", payload.account_id)
-        .single();
-      if (fromAccount) {
-        if (fromAccount.type === "credit_card") {
-          const newOutstanding = Math.max(0, (Number(fromAccount.outstanding_balance) || 0) + amount);
-          await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
-        } else {
-          await supabase.from("accounts").update({ balance: (Number(fromAccount.balance) || 0) - amount }).eq("id", payload.account_id);
-        }
-      }
-    }
-    // Credit destination account
-    if (payload.transfer_to_account_id) {
-      const { data: toAccount } = await supabase
-        .from("accounts")
-        .select("type, balance, outstanding_balance")
-        .eq("id", payload.transfer_to_account_id)
-        .single();
-      if (toAccount) {
-        if (toAccount.type === "credit_card") {
-          const newOutstanding = Math.max(0, (Number(toAccount.outstanding_balance) || 0) - amount);
-          await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.transfer_to_account_id);
-        } else {
-          await supabase.from("accounts").update({ balance: (Number(toAccount.balance) || 0) + amount }).eq("id", payload.transfer_to_account_id);
-        }
-      }
-    }
-  }
-}
+// Balance updates are applied atomically in Postgres via src/lib/balance.ts
+// (a plain module, so importing it here does not create a cross-"use server"
+// dependency).
+import { applyBalanceUpdate } from "@/lib/balance";
 
 // ═══════════════════════════════════════════════════════════
 // BODY EXTRACTION — handles nested MIME structures
@@ -568,7 +512,7 @@ export async function syncGmailAction() {
     if (!approvalRequired) {
       // cc_payment stored as transfer in main transactions
       const insertType = parsed.type === "cc_payment" ? "transfer" : parsed.type;
-      const { error: txnError } = await supabase
+      const { data: insertedTxn, error: txnError } = await supabase
         .from("transactions")
         .insert({
           user_id: user.id,
@@ -581,15 +525,24 @@ export async function syncGmailAction() {
           source_email_id: email.msgId,
           original_synced_name: originalMerchantName,
           source: "email",
-        });
+        })
+        .select("id")
+        .single();
 
-      if (!txnError) {
-        await applyPendingBalanceUpdate(supabase, {
+      if (!txnError && insertedTxn) {
+        const balanceResult = await applyBalanceUpdate(supabase, {
           type: parsed.type,
           amount: parsed.amount,
           account_id: matchedAccountId,
         });
-        newCount++;
+        if (balanceResult.error) {
+          // Compensate: remove the row so the next sync re-imports this email
+          // instead of leaving a transaction with no balance effect.
+          console.error(`[SYNC] Balance update failed for auto-imported txn: ${balanceResult.error}`);
+          await supabase.from("transactions").delete().eq("id", insertedTxn.id).eq("user_id", user.id);
+        } else {
+          newCount++;
+        }
       }
     } else {
       await supabase
@@ -641,20 +594,25 @@ export async function approvePendingAction(pendingId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Unauthorized" };
 
-  const { data: pending } = await supabase
+  // Claim the pending row by deleting it conditionally. delete().select()
+  // returns the row exactly once, so a concurrent approval (double-click)
+  // gets nothing back and cannot insert the transaction twice.
+  const { data: pending, error: claimError } = await supabase
     .from("pending_transactions")
-    .select("*")
+    .delete()
     .eq("id", pendingId)
     .eq("user_id", user.id)
-    .single();
+    .select("*")
+    .maybeSingle();
 
-  if (!pending) return { error: "Transaction not found." };
+  if (claimError) return { error: "Failed to approve transaction." };
+  if (!pending) return { error: "Transaction not found (it may have already been approved)." };
 
   const isCCPayment = pending.type === "cc_payment";
   // cc_payment is stored as 'transfer' in the main transactions table
   const insertType = isCCPayment ? "transfer" : pending.type;
 
-  const { error: txnError } = await supabase
+  const { data: insertedTxn, error: txnError } = await supabase
     .from("transactions")
     .insert({
       user_id: user.id,
@@ -669,21 +627,26 @@ export async function approvePendingAction(pendingId: string) {
       raw_sms_id: pending.raw_sms_id || null,
       source: pending.source || 'email',
       transfer_to_account_id: pending.transfer_to_account_id || null,
-    });
+    })
+    .select("id")
+    .single();
 
-  if (txnError) return { error: "Failed to save transaction." };
+  if (txnError || !insertedTxn) {
+    // Restore the claimed pending row (best effort) so the user can retry
+    await supabase.from("pending_transactions").insert(pending);
+    return { error: "Failed to save transaction." };
+  }
 
-  await applyPendingBalanceUpdate(supabase, {
+  const balanceResult = await applyBalanceUpdate(supabase, {
     type: pending.type,
     amount: Number(pending.amount),
     account_id: pending.account_id,
     transfer_to_account_id: pending.transfer_to_account_id || null,
   });
 
-  await supabase
-    .from("pending_transactions")
-    .delete()
-    .eq("id", pendingId);
+  if (balanceResult.error) {
+    return { error: `Transaction approved, but its balance update failed (${balanceResult.error}). Please review your account balances.` };
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
@@ -712,20 +675,27 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
 
   if (!pendingIds || pendingIds.length === 0) return { success: true };
 
-  const { data: pendingTxns } = await supabase
+  // Claim all requested pending rows atomically. A concurrent bulk approve
+  // (or a racing single approve) gets none of the same rows back, so nothing
+  // is inserted twice.
+  const { data: pendingTxns, error: claimError } = await supabase
     .from("pending_transactions")
-    .select("*")
+    .delete()
     .in("id", pendingIds)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select("*");
 
-  if (!pendingTxns || pendingTxns.length === 0) return { error: "Transactions not found." };
+  if (claimError) return { error: "Failed to approve transactions." };
+  if (!pendingTxns || pendingTxns.length === 0) {
+    return { error: "Transactions not found (they may have already been approved)." };
+  }
 
-  const successfulIds: string[] = [];
+  const failures: string[] = [];
   for (const pending of pendingTxns) {
     const isCCPayment = pending.type === "cc_payment";
     const insertType = isCCPayment ? "transfer" : pending.type;
 
-    const { error: txnError } = await supabase
+    const { data: insertedTxn, error: txnError } = await supabase
       .from("transactions")
       .insert({
         user_id: user.id,
@@ -740,29 +710,37 @@ export async function approvePendingBulkAction(pendingIds: string[]) {
         raw_sms_id: pending.raw_sms_id || null,
         source: pending.source || 'email',
         transfer_to_account_id: pending.transfer_to_account_id || null,
-      });
+      })
+      .select("id")
+      .single();
 
-    if (!txnError) {
-      await applyPendingBalanceUpdate(supabase, {
-        type: pending.type,
-        amount: Number(pending.amount),
-        account_id: pending.account_id,
-        transfer_to_account_id: pending.transfer_to_account_id || null,
-      });
-      successfulIds.push(pending.id);
+    if (txnError || !insertedTxn) {
+      // Restore this pending row (best effort) so it can be retried
+      await supabase.from("pending_transactions").insert(pending);
+      failures.push(pending.note || pending.id);
+      continue;
     }
-  }
 
-  if (successfulIds.length > 0) {
-    await supabase
-      .from("pending_transactions")
-      .delete()
-      .in("id", successfulIds)
-      .eq("user_id", user.id);
+    const balanceResult = await applyBalanceUpdate(supabase, {
+      type: pending.type,
+      amount: Number(pending.amount),
+      account_id: pending.account_id,
+      transfer_to_account_id: pending.transfer_to_account_id || null,
+    });
+    if (balanceResult.error) {
+      failures.push(`${pending.note || pending.id} (balance update failed)`);
+    }
   }
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
+
+  if (failures.length > 0) {
+    const preview = failures.slice(0, 3).join(", ");
+    return {
+      error: `Approved ${pendingTxns.length - failures.length} of ${pendingTxns.length}. Failed: ${preview}${failures.length > 3 ? "…" : ""}. Please review your balances.`,
+    };
+  }
   return { success: true };
 }
 

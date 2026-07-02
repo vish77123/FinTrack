@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { applyBalanceUpdate, reverseBalanceUpdate } from "@/lib/balance";
 
 // cc_payment is used in the pending/parsing layer; stored as 'transfer' in main transactions
 const transactionSchema = z.object({
@@ -15,164 +16,9 @@ const transactionSchema = z.object({
   transfer_to_account_id: z.string().uuid().optional().nullable(),
 });
 
-// ─────────────────────────────────────────────────────────────
-// CREDIT CARD-AWARE BALANCE UPDATE
-// Fetches account type before deciding which column to update.
-// ─────────────────────────────────────────────────────────────
-async function applyBalanceUpdate(supabase: any, payload: any) {
-  const amount = Number(payload.amount);
-
-  if (payload.type === "expense" || payload.type === "income" || payload.type === "cc_payment") {
-    // Fetch account type to determine which logic to use
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("type, balance, outstanding_balance")
-      .eq("id", payload.account_id)
-      .single();
-
-    if (!account) return;
-
-    if (account.type === "credit_card") {
-      // Credit card: expense = more debt, income/cc_payment = less debt (floor 0)
-      const delta = payload.type === "expense" ? amount : -amount;
-      const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
-      await supabase
-        .from("accounts")
-        .update({ outstanding_balance: newOutstanding })
-        .eq("id", payload.account_id);
-    } else {
-      // Bank / cash / savings / contact: original balance logic
-      const delta = payload.type === "income" ? amount : -amount;
-      const newBalance = (Number(account.balance) || 0) + delta;
-      await supabase
-        .from("accounts")
-        .update({ balance: newBalance })
-        .eq("id", payload.account_id);
-    }
-
-  } else if (payload.type === "transfer") {
-    // Source account (always reduces)
-    const { data: fromAccount } = await supabase
-      .from("accounts")
-      .select("type, balance, outstanding_balance")
-      .eq("id", payload.account_id)
-      .single();
-
-    if (fromAccount) {
-      if (fromAccount.type === "credit_card") {
-        // Paying FROM a credit card (unusual, but handle it as an expense on CC)
-        const newOutstanding = Math.max(0, (Number(fromAccount.outstanding_balance) || 0) + amount);
-        await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
-      } else {
-        await supabase
-          .from("accounts")
-          .update({ balance: (Number(fromAccount.balance) || 0) - amount })
-          .eq("id", payload.account_id);
-      }
-    }
-
-    // Destination account
-    if (payload.transfer_to_account_id) {
-      const { data: toAccount } = await supabase
-        .from("accounts")
-        .select("type, balance, outstanding_balance")
-        .eq("id", payload.transfer_to_account_id)
-        .single();
-
-      if (toAccount) {
-        if (toAccount.type === "credit_card") {
-          // Bill payment: reduce outstanding debt. No floor — overpayment is stored as a
-          // negative outstanding (credit balance) so that reversal can add the exact amount back.
-          const newOutstanding = (Number(toAccount.outstanding_balance) || 0) - amount;
-          await supabase
-            .from("accounts")
-            .update({ outstanding_balance: newOutstanding })
-            .eq("id", payload.transfer_to_account_id);
-        } else {
-          // Normal transfer: increase destination balance
-          await supabase
-            .from("accounts")
-            .update({ balance: (Number(toAccount.balance) || 0) + amount })
-            .eq("id", payload.transfer_to_account_id);
-        }
-      }
-    }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-// REVERSE BALANCE UPDATE (for delete/edit flows)
-// ─────────────────────────────────────────────────────────────
-export async function reverseBalanceUpdate(supabase: any, payload: {
-  type: string;
-  amount: number;
-  account_id: string;
-  transfer_to_account_id?: string | null;
-}) {
-  const amount = Number(payload.amount);
-
-  if (payload.type === "expense" || payload.type === "income" || payload.type === "cc_payment") {
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("type, balance, outstanding_balance")
-      .eq("id", payload.account_id)
-      .single();
-
-    if (!account) return;
-
-    if (account.type === "credit_card") {
-      // Reverse: expense reversal = decrease outstanding; income reversal = increase outstanding
-      const delta = payload.type === "expense" ? -amount : amount;
-      const newOutstanding = Math.max(0, (Number(account.outstanding_balance) || 0) + delta);
-      await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
-    } else {
-      const delta = payload.type === "income" ? -amount : amount;
-      const newBalance = (Number(account.balance) || 0) + delta;
-      await supabase.from("accounts").update({ balance: newBalance }).eq("id", payload.account_id);
-    }
-  } else if (payload.type === "transfer") {
-    // Reverse source: add back to source
-    const { data: fromAccount } = await supabase
-      .from("accounts")
-      .select("type, balance, outstanding_balance")
-      .eq("id", payload.account_id)
-      .single();
-
-    if (fromAccount) {
-      if (fromAccount.type === "credit_card") {
-        const newOutstanding = Math.max(0, (Number(fromAccount.outstanding_balance) || 0) - amount);
-        await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.account_id);
-      } else {
-        await supabase
-          .from("accounts")
-          .update({ balance: (Number(fromAccount.balance) || 0) + amount })
-          .eq("id", payload.account_id);
-      }
-    }
-
-    // Reverse destination: take back from destination
-    if (payload.transfer_to_account_id) {
-      const { data: toAccount } = await supabase
-        .from("accounts")
-        .select("type, balance, outstanding_balance")
-        .eq("id", payload.transfer_to_account_id)
-        .single();
-
-      if (toAccount) {
-        if (toAccount.type === "credit_card") {
-          // Reversing a payment: outstanding goes back up
-          const newOutstanding = (Number(toAccount.outstanding_balance) || 0) + amount;
-          await supabase.from("accounts").update({ outstanding_balance: newOutstanding }).eq("id", payload.transfer_to_account_id);
-        } else {
-          await supabase
-            .from("accounts")
-            .update({ balance: (Number(toAccount.balance) || 0) - amount })
-            .eq("id", payload.transfer_to_account_id);
-        }
-      }
-    }
-  }
-}
+// Balance updates live in src/lib/balance.ts: deltas are applied atomically
+// in Postgres so concurrent mutations can't overwrite each other, and every
+// call returns an error that MUST be surfaced to the user.
 
 export async function addTransactionAction(formData: FormData) {
   const supabase = await createClient();
@@ -226,7 +72,10 @@ export async function addTransactionAction(formData: FormData) {
         return { error: "Failed to save split transaction." };
       }
 
-      await applyBalanceUpdate(supabase, validated.data);
+      const balanceResult = await applyBalanceUpdate(supabase, validated.data);
+      if (balanceResult.error) {
+        return { error: `A split row was saved but its account balance could not be updated (${balanceResult.error}). Please review your balances.` };
+      }
     }
   } else {
     // Extract raw form data for normal single
@@ -252,7 +101,7 @@ export async function addTransactionAction(formData: FormData) {
     const payload = validated.data;
 
     // Insert into DB; cc_payment stored as transfer in main transactions
-    const { error: dbError } = await supabase
+    const { data: inserted, error: dbError } = await supabase
       .from("transactions")
       .insert({
         user_id: user.id,
@@ -263,14 +112,21 @@ export async function addTransactionAction(formData: FormData) {
         date: payload.date,
         note: payload.note,
         transfer_to_account_id: payload.transfer_to_account_id
-      });
+      })
+      .select("id")
+      .single();
 
-    if (dbError) {
+    if (dbError || !inserted) {
       console.error("Database Insert Error:", dbError);
       return { error: "Failed to save transaction. Please try again." };
     }
 
-    await applyBalanceUpdate(supabase, payload);
+    const balanceResult = await applyBalanceUpdate(supabase, payload);
+    if (balanceResult.error) {
+      // Compensate: remove the row so a retry doesn't double-record it
+      await supabase.from("transactions").delete().eq("id", inserted.id).eq("user_id", user.id);
+      return { error: balanceResult.error };
+    }
   }
 
   // Instruct Next.js cache to purge and grab fresh DB data for dashboard views
@@ -305,15 +161,8 @@ export async function editTransactionAction(transactionId: string, formData: For
 
   if (!newAmount || newAmount <= 0) return { error: "Amount must be greater than zero." };
 
-  // Reverse old balance effect (CC-aware)
-  await reverseBalanceUpdate(supabase, {
-    type: existing.type,
-    amount: Number(existing.amount),
-    account_id: existing.account_id,
-    transfer_to_account_id: existing.transfer_to_account_id,
-  });
-
-  // Update the transaction row
+  // Update the transaction row FIRST — if this fails, no balance has been
+  // touched yet and the previous state remains fully consistent.
   const { error: updateError } = await supabase
     .from("transactions")
     .update({
@@ -341,13 +190,26 @@ export async function editTransactionAction(transactionId: string, formData: For
     }, { onConflict: "user_id, synced_name" });
   }
 
-  // Apply new balance effect (CC-aware)
-  await applyBalanceUpdate(supabase, {
+  // Reverse the old balance effect, then apply the new one (both atomic)
+  const reverseResult = await reverseBalanceUpdate(supabase, {
+    type: existing.type,
+    amount: Number(existing.amount),
+    account_id: existing.account_id,
+    transfer_to_account_id: existing.transfer_to_account_id,
+  });
+  if (reverseResult.error) {
+    return { error: `Transaction updated, but reversing its old balance effect failed (${reverseResult.error}). Please review your account balances.` };
+  }
+
+  const applyResult = await applyBalanceUpdate(supabase, {
     type: newType,
     amount: newAmount,
     account_id: newAccountId,
     transfer_to_account_id: formData.get("transfer_to_account_id") as string || null,
   });
+  if (applyResult.error) {
+    return { error: `Transaction updated, but applying its new balance effect failed (${applyResult.error}). Please review your account balances.` };
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
@@ -420,65 +282,8 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "You must be logged in." };
 
-  // sourceEmailId is carried from the original transaction(s) to the new split children
-  // so that the Gmail sync dedup can still find a row for the original email ID.
-  let sourceEmailId: string | null = null;
-
-  if (isSplitGroup) {
-    // ── GROUP EDIT: fetch all siblings, reverse all balances, delete all ──
-    const { data: siblings } = await supabase
-      .from("transactions")
-      .select("id, type, amount, account_id, transfer_to_account_id, source_email_id")
-      .eq("split_group_id", idOrGroupId)
-      .eq("user_id", user.id);
-
-    if (!siblings || siblings.length === 0) return { error: "Split group not found." };
-
-    for (const sibling of siblings) {
-      await reverseBalanceUpdate(supabase, {
-        type: sibling.type,
-        amount: Number(sibling.amount),
-        account_id: sibling.account_id,
-        transfer_to_account_id: sibling.transfer_to_account_id,
-      });
-    }
-
-    const { error: delErr } = await supabase
-      .from("transactions").delete().eq("split_group_id", idOrGroupId).eq("user_id", user.id);
-    if (delErr) return { error: "Failed to remove original split group." };
-
-    // Carry the source_email_id forward so the sync dedup doesn't re-import this email
-    sourceEmailId = siblings.find(s => s.source_email_id)?.source_email_id ?? null;
-
-  } else {
-    // ── SINGLE EDIT: fetch one transaction, reverse its balance, delete it ──
-    const { data: existing } = await supabase
-      .from("transactions")
-      .select("*")
-      .eq("id", idOrGroupId)
-      .eq("user_id", user.id)
-      .single();
-
-    if (!existing) return { error: "Original transaction not found." };
-
-    // Reverse balance effects (CC-aware)
-    await reverseBalanceUpdate(supabase, {
-      type: existing.type,
-      amount: Number(existing.amount),
-      account_id: existing.account_id,
-      transfer_to_account_id: existing.transfer_to_account_id,
-    });
-
-    const { error: deleteError } = await supabase
-      .from("transactions").delete().eq("id", idOrGroupId).eq("user_id", user.id);
-    if (deleteError) return { error: "Failed to remove the original transaction during conversion." };
-
-    // Carry the source_email_id forward so the sync dedup doesn't re-import this email
-    sourceEmailId = existing.source_email_id ?? null;
-  }
-
-
-  // Parse split rows from formData
+  // Parse and validate ALL split rows BEFORE touching the originals — a bad
+  // form must not delete the existing transaction(s).
   let splits: any[] = [];
   try {
     splits = JSON.parse(formData.get("splits") as string);
@@ -489,10 +294,8 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
   const accountId = formData.get("account_id") as string;
   const date = new Date(formData.get("date") as string).toISOString();
   const baseNote = (formData.get("note") as string) || null;
-  const splitGroupId = crypto.randomUUID();
 
-  // Insert each split; stamp source_email_id only on the first row (the dedup anchor)
-  let isFirstSplit = true;
+  const validatedSplits: z.infer<typeof transactionSchema>[] = [];
   for (const split of splits) {
     const payload = {
       amount: split.amount ? parseFloat(split.amount) : 0,
@@ -507,16 +310,85 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
 
     const validated = transactionSchema.safeParse(payload);
     if (!validated.success) return { error: validated.error.issues[0].message };
+    validatedSplits.push(validated.data);
+  }
 
+  // sourceEmailId is carried from the original transaction(s) to the new split children
+  // so that the Gmail sync dedup can still find a row for the original email ID.
+  let sourceEmailId: string | null = null;
+
+  if (isSplitGroup) {
+    // ── GROUP EDIT: claim (delete) all siblings atomically, then reverse ──
+    // delete().select() claims the rows in one statement: a concurrent
+    // invocation gets zero rows back and cannot double-reverse the balances.
+    const { data: siblings, error: claimError } = await supabase
+      .from("transactions")
+      .delete()
+      .eq("split_group_id", idOrGroupId)
+      .eq("user_id", user.id)
+      .select("id, type, amount, account_id, transfer_to_account_id, source_email_id");
+
+    if (claimError) return { error: "Failed to remove original split group." };
+    if (!siblings || siblings.length === 0) return { error: "Split group not found." };
+
+    for (const sibling of siblings) {
+      const reverseResult = await reverseBalanceUpdate(supabase, {
+        type: sibling.type,
+        amount: Number(sibling.amount),
+        account_id: sibling.account_id,
+        transfer_to_account_id: sibling.transfer_to_account_id,
+      });
+      if (reverseResult.error) {
+        return { error: `Original split removed, but reversing its balance effect failed (${reverseResult.error}). Please review your account balances.` };
+      }
+    }
+
+    // Carry the source_email_id forward so the sync dedup doesn't re-import this email
+    sourceEmailId = siblings.find(s => s.source_email_id)?.source_email_id ?? null;
+
+  } else {
+    // ── SINGLE EDIT: claim (delete) the transaction, then reverse its balance ──
+    const { data: existing, error: claimError } = await supabase
+      .from("transactions")
+      .delete()
+      .eq("id", idOrGroupId)
+      .eq("user_id", user.id)
+      .select("type, amount, account_id, transfer_to_account_id, source_email_id")
+      .maybeSingle();
+
+    if (claimError) return { error: "Failed to remove the original transaction during conversion." };
+    if (!existing) return { error: "Original transaction not found." };
+
+    const reverseResult = await reverseBalanceUpdate(supabase, {
+      type: existing.type,
+      amount: Number(existing.amount),
+      account_id: existing.account_id,
+      transfer_to_account_id: existing.transfer_to_account_id,
+    });
+    if (reverseResult.error) {
+      return { error: `Original transaction removed, but reversing its balance effect failed (${reverseResult.error}). Please review your account balances.` };
+    }
+
+    // Carry the source_email_id forward so the sync dedup doesn't re-import this email
+    sourceEmailId = existing.source_email_id ?? null;
+  }
+
+
+  const splitGroupId = crypto.randomUUID();
+
+  // Insert each (pre-validated) split; stamp source_email_id only on the
+  // first row (the dedup anchor)
+  let isFirstSplit = true;
+  for (const splitData of validatedSplits) {
     const { error: insertError } = await supabase.from("transactions").insert({
       user_id: user.id,
-      amount: validated.data.amount,
-      type: validated.data.type === "cc_payment" ? "transfer" : validated.data.type,
-      account_id: validated.data.account_id,
-      category_id: validated.data.category_id,
-      date: validated.data.date,
-      note: validated.data.note,
-      transfer_to_account_id: validated.data.transfer_to_account_id,
+      amount: splitData.amount,
+      type: splitData.type === "cc_payment" ? "transfer" : splitData.type,
+      account_id: splitData.account_id,
+      category_id: splitData.category_id,
+      date: splitData.date,
+      note: splitData.note,
+      transfer_to_account_id: splitData.transfer_to_account_id,
       split_group_id: splitGroupId,
       // First split child inherits source_email_id so sync won't re-import this email
       ...(isFirstSplit && sourceEmailId ? { source_email_id: sourceEmailId } : {}),
@@ -528,7 +400,10 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
       return { error: "Failed to save one of the split transactions." };
     }
 
-    await applyBalanceUpdate(supabase, validated.data);
+    const balanceResult = await applyBalanceUpdate(supabase, splitData);
+    if (balanceResult.error) {
+      return { error: `A split row was saved but its account balance could not be updated (${balanceResult.error}). Please review your balances.` };
+    }
   }
 
   revalidatePath("/dashboard");
@@ -546,41 +421,8 @@ export async function collapseSplitToSingleAction(splitGroupId: string, formData
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "You must be logged in." };
 
-  // 1. Fetch all siblings
-  const { data: siblings } = await supabase
-    .from("transactions")
-    .select("id, type, amount, account_id, transfer_to_account_id, source_email_id")
-    .eq("split_group_id", splitGroupId)
-    .eq("user_id", user.id);
-
-  if (!siblings || siblings.length === 0) return { error: "Split group not found." };
-
-  // 2. Reverse each sibling's balance (CC-aware)
-  for (const sib of siblings) {
-    await reverseBalanceUpdate(supabase, {
-      type: sib.type,
-      amount: Number(sib.amount),
-      account_id: sib.account_id,
-      transfer_to_account_id: sib.transfer_to_account_id,
-    });
-  }
-
-  // 3. Delete all siblings
-  const { error: deleteError } = await supabase
-    .from("transactions")
-    .delete()
-    .eq("split_group_id", splitGroupId)
-    .eq("user_id", user.id);
-
-  if (deleteError) {
-    console.error("collapseSplitToSingle – delete error:", deleteError);
-    return { error: "Failed to remove the split transactions." };
-  }
-
-  // Carry the source_email_id from the first sibling that has one (dedup anchor)
-  const sourceEmailId = siblings.find(s => s.source_email_id)?.source_email_id ?? null;
-
-  // 4. Build and validate the new single transaction payload
+  // 1. Build and validate the new single transaction payload BEFORE deleting
+  //    anything — an invalid form must not destroy the original split rows.
   const payload = {
     amount: parseFloat(formData.get("amount") as string),
     type: formData.get("type") as string,
@@ -594,7 +436,38 @@ export async function collapseSplitToSingleAction(splitGroupId: string, formData
   const validated = transactionSchema.safeParse(payload);
   if (!validated.success) return { error: validated.error.issues[0].message };
 
-  // 5. Insert the single transaction
+  // 2. Claim (delete) all siblings atomically — a concurrent invocation gets
+  //    zero rows back and cannot double-reverse the balances.
+  const { data: siblings, error: claimError } = await supabase
+    .from("transactions")
+    .delete()
+    .eq("split_group_id", splitGroupId)
+    .eq("user_id", user.id)
+    .select("id, type, amount, account_id, transfer_to_account_id, source_email_id");
+
+  if (claimError) {
+    console.error("collapseSplitToSingle – delete error:", claimError);
+    return { error: "Failed to remove the split transactions." };
+  }
+  if (!siblings || siblings.length === 0) return { error: "Split group not found." };
+
+  // 3. Reverse each sibling's balance (atomic, CC-aware)
+  for (const sib of siblings) {
+    const reverseResult = await reverseBalanceUpdate(supabase, {
+      type: sib.type,
+      amount: Number(sib.amount),
+      account_id: sib.account_id,
+      transfer_to_account_id: sib.transfer_to_account_id,
+    });
+    if (reverseResult.error) {
+      return { error: `Split rows removed, but reversing a balance effect failed (${reverseResult.error}). Please review your account balances.` };
+    }
+  }
+
+  // Carry the source_email_id from the first sibling that has one (dedup anchor)
+  const sourceEmailId = siblings.find(s => s.source_email_id)?.source_email_id ?? null;
+
+  // 4. Insert the single transaction
   const { error: insertError } = await supabase.from("transactions").insert({
     user_id: user.id,
     amount: validated.data.amount,
@@ -613,7 +486,10 @@ export async function collapseSplitToSingleAction(splitGroupId: string, formData
     return { error: "Failed to save the merged transaction." };
   }
 
-  await applyBalanceUpdate(supabase, validated.data);
+  const applyResult = await applyBalanceUpdate(supabase, validated.data);
+  if (applyResult.error) {
+    return { error: `Merged transaction saved but its balance update failed (${applyResult.error}). Please review your balances.` };
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
