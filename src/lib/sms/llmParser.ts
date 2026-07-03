@@ -209,15 +209,29 @@ interface SmsForParsing {
   sender?: string;
 }
 
+export interface ParserOutcome {
+  results: Map<string, LLMParsedTransaction>;
+  /**
+   * true when the provider itself failed (no keys configured, rate limits
+   * exhausted, API error, unparseable response) — distinct from a successful
+   * call that found no transactions in the input. Callers should only fail
+   * over to another provider when this is true.
+   */
+  providerFailed: boolean;
+  failureReason?: string;
+}
+
 export async function parseSmsWithLLM(
   messages: SmsForParsing[],
   config?: any
-): Promise<Map<string, LLMParsedTransaction>> {
+): Promise<ParserOutcome> {
   const results = new Map<string, LLMParsedTransaction>();
-  if (messages.length === 0) return results;
+  if (messages.length === 0) return { results, providerFailed: false };
 
   const activeKeys = getRequestKeys(config?.geminiKeys);
-  if (activeKeys.length === 0) return results;
+  if (activeKeys.length === 0) {
+    return { results, providerFailed: true, failureReason: "no_gemini_keys" };
+  }
 
   const messagesBlock = messages.map((msg, idx) => `
 --- SMS ${idx + 1} (ID: ${msg.id}) ---
@@ -301,9 +315,13 @@ ${messagesBlock}
 
     console.log(`[SMS-LLM] Raw response: ${outputString?.slice(0, 600) || "(empty)"}`);
 
-    if (!outputString) return results;
+    // null means the provider was unavailable (keys exhausted / API errors),
+    // not that the SMS contained no transactions.
+    if (!outputString) {
+      return { results, providerFailed: true, failureReason: "gemini_unavailable" };
+    }
 
-    let parsedArray: any[] = [];
+    let parsedArray: any[] | null = null;
     try {
       parsedArray = JSON.parse(outputString);
     } catch {
@@ -313,37 +331,44 @@ ${messagesBlock}
       } catch {
         const match = cleaned.match(/\[[\s\S]*\]/);
         if (match) {
-          parsedArray = JSON.parse(match[0]);
+          try {
+            parsedArray = JSON.parse(match[0]);
+          } catch {
+            parsedArray = null;
+          }
         }
       }
     }
 
-    if (Array.isArray(parsedArray)) {
-      console.log(`[SMS-LLM] Parsed ${parsedArray.length} items:`);
+    if (!Array.isArray(parsedArray)) {
+      return { results, providerFailed: true, failureReason: "gemini_unparseable_response" };
+    }
 
-      for (const item of parsedArray) {
-        console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
+    console.log(`[SMS-LLM] Parsed ${parsedArray.length} items:`);
 
-        if (!item.emailId || !item.amount || Number(item.amount) <= 0) continue;
+    for (const item of parsedArray) {
+      console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
 
-        results.set(item.emailId, {
-          amount: Number(item.amount),
-          type: ["income", "expense", "cc_payment", "transfer"].includes(item.type) ? item.type : "expense",
-          merchant: item.merchant || (item.type === "cc_payment" ? "Credit Card Payment" : "Bank Transaction"),
-          date: item.date || new Date().toISOString().split("T")[0],
-          accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
-          confidence: 0.80,
-          categoryId: item.categoryId || undefined,
-          newCategory: item.newCategory || undefined,
-        });
-      }
+      if (!item.emailId || !item.amount || Number(item.amount) <= 0) continue;
+
+      results.set(item.emailId, {
+        amount: Number(item.amount),
+        type: ["income", "expense", "cc_payment", "transfer"].includes(item.type) ? item.type : "expense",
+        merchant: item.merchant || (item.type === "cc_payment" ? "Credit Card Payment" : "Bank Transaction"),
+        date: item.date || new Date().toISOString().split("T")[0],
+        accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
+        confidence: 0.80,
+        categoryId: item.categoryId || undefined,
+        newCategory: item.newCategory || undefined,
+      });
     }
 
     console.log(`[SMS-LLM ✓] ${results.size}/${messages.length} transactions extracted`);
 
   } catch (err) {
     console.error("[SMS-LLM] Batch parsing failed:", err);
+    return { results, providerFailed: true, failureReason: "gemini_exception" };
   }
 
-  return results;
+  return { results, providerFailed: false };
 }

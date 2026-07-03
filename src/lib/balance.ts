@@ -4,14 +4,17 @@
  *
  * Deltas are applied atomically in Postgres via the increment_account_balance
  * / increment_cc_outstanding RPCs (see
- * supabase/migrations/20260702120000_atomic_balance_updates.sql), so
- * concurrent mutations cannot overwrite each other's updates.
+ * supabase/migrations/022_atomic_balance_updates.sql), so concurrent
+ * mutations cannot overwrite each other's updates.
  *
  * reverseBalanceUpdate() is applyBalanceUpdate() with the sign flipped, which
  * guarantees apply and reverse are exact inverses — including for credit
  * cards, where outstanding_balance is no longer floored at 0 (an overpayment
  * is a negative outstanding, i.e. a credit on the card; the dashboard clamps
  * it to 0 for net-worth and CC-debt display).
+ *
+ * This is a plain lib module (NOT "use server"), so action files may import
+ * it without violating the no-cross-action-imports rule.
  */
 
 export interface BalancePayload {

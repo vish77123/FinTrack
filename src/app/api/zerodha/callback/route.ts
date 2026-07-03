@@ -9,6 +9,11 @@
  *   2. POST to https://api.kite.trade/session/token
  *   3. Save the returned access_token to zerodha_credentials
  *   4. Redirect to /investments
+ *
+ * IMPORTANT: next/navigation's redirect() works by THROWING an internal
+ * NEXT_REDIRECT error. It must never be called inside a try/catch that
+ * catches generic errors — the catch would intercept the redirect itself.
+ * All redirect() calls below live outside the try block.
  */
 
 import { createHash } from "crypto";
@@ -40,7 +45,8 @@ export async function GET(request: Request) {
     .update(apiKey + requestToken + apiSecret)
     .digest("hex");
 
-  let accessToken: string;
+  let accessToken: string | null = null;
+  let exchangeError: string | null = null;
   try {
     const res = await fetch(`${KITE_BASE}/session/token`, {
       method: "POST",
@@ -58,36 +64,45 @@ export async function GET(request: Request) {
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       console.error("[zerodha/callback] Session token exchange failed:", res.status, text);
-      redirect(
-        `/investments?zerodha_error=${encodeURIComponent(`Token exchange failed (${res.status}): ${text}`)}`
-      );
+      exchangeError = `Token exchange failed (${res.status}): ${text.slice(0, 200)}`;
+    } else {
+      const json = (await res.json()) as { status: string; data?: { access_token: string } };
+      if (json.status !== "success" || !json.data?.access_token) {
+        exchangeError = "Kite did not return an access_token";
+      } else {
+        accessToken = json.data.access_token;
+      }
     }
-
-    const json = (await res.json()) as { status: string; data?: { access_token: string } };
-    if (json.status !== "success" || !json.data?.access_token) {
-      redirect("/investments?zerodha_error=Kite+did+not+return+an+access_token");
-    }
-    accessToken = json.data.access_token;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    redirect(`/investments?zerodha_error=${encodeURIComponent(msg)}`);
+    exchangeError = err instanceof Error ? err.message : String(err);
+  }
+
+  if (!accessToken) {
+    redirect(`/investments?zerodha_error=${encodeURIComponent(exchangeError || "Unknown error during token exchange")}`);
   }
 
   // Save to DB so the page can read it server-side
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (user) {
-    await supabase.from("zerodha_credentials").upsert(
-      {
-        user_id: user.id,
-        api_key: apiKey,
-        access_token: accessToken,
-        token_date: new Date().toISOString().slice(0, 10),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
+  if (!user) {
+    redirect(`/investments?zerodha_error=${encodeURIComponent("You were signed out during the Zerodha login. Sign in and try again.")}`);
+  }
+
+  const { error: saveError } = await supabase.from("zerodha_credentials").upsert(
+    {
+      user_id: user.id,
+      api_key: apiKey,
+      access_token: accessToken,
+      token_date: new Date().toISOString().slice(0, 10),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+
+  if (saveError) {
+    console.error("[zerodha/callback] Failed to save credentials:", saveError.message);
+    redirect(`/investments?zerodha_error=${encodeURIComponent(`Login succeeded but saving credentials failed: ${saveError.message}`)}`);
   }
 
   redirect("/investments?zerodha_connected=1");

@@ -84,28 +84,39 @@ export async function parseSmsToTransaction(
       // User prefers NVIDIA as primary
       console.log(`[SMS-ORCH] Using NVIDIA NIM as primary LLM provider`);
       parsedBy = "sms-nvidia";
-      llmMap = await parseSmsWithNvidia(msgs, {
+      const nvidia = await parseSmsWithNvidia(msgs, {
         nvidiaKey: config?.settings?.nvidia_api_key,
         nvidiaModel: config?.settings?.nvidia_model_id,
         existingCategories: config?.categories || [],
       });
+      llmMap = nvidia.results;
+      if (nvidia.providerFailed) {
+        console.error(`[SMS-ORCH] NVIDIA NIM failed (${nvidia.failureReason || "unknown"}) — SMS left unparsed; retry from the /sms page.`);
+      }
     } else {
       // Gemini primary, NVIDIA fallback
       console.log(`[SMS-ORCH] Using Gemini as primary LLM provider`);
-      llmMap = await parseSmsWithLLM(msgs, {
+      const gemini = await parseSmsWithLLM(msgs, {
         geminiKeys: config?.settings?.gemini_api_keys,
         geminiModel: config?.settings?.gemini_model_id,
         existingCategories: config?.categories || [],
       });
+      llmMap = gemini.results;
 
-      if (llmMap.size === 0) {
-        console.log(`[SMS-ORCH] Gemini returned nothing. Falling over to NVIDIA NIM...`);
+      // Fail over only when Gemini itself failed — an empty result from a
+      // healthy call means this SMS is not a transaction.
+      if (gemini.providerFailed) {
+        console.log(`[SMS-ORCH] Gemini failed (${gemini.failureReason || "unknown"}). Falling over to NVIDIA NIM...`);
         parsedBy = "sms-nvidia";
-        llmMap = await parseSmsWithNvidia(msgs, {
+        const nvidia = await parseSmsWithNvidia(msgs, {
           nvidiaKey: config?.settings?.nvidia_api_key,
           nvidiaModel: config?.settings?.nvidia_model_id,
           existingCategories: config?.categories || [],
         });
+        llmMap = nvidia.results;
+        if (nvidia.providerFailed) {
+          console.error(`[SMS-ORCH] Both LLM providers failed (Gemini: ${gemini.failureReason || "unknown"}; NVIDIA: ${nvidia.failureReason || "unknown"}) — SMS left unparsed; retry from the /sms page.`);
+        }
       }
     }
 

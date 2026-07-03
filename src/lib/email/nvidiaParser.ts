@@ -43,17 +43,28 @@ function sanitize(text: string): string {
 
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 
+export interface ParserOutcome {
+  results: Map<string, LLMParsedTransaction>;
+  /**
+   * true when the provider itself failed (no key configured, API error,
+   * unparseable response) — distinct from a successful call that found no
+   * transactions in the input.
+   */
+  providerFailed: boolean;
+  failureReason?: string;
+}
+
 export async function parseBatchWithNvidia(
   emails: { id: string; text: string }[],
   config?: any
-): Promise<Map<string, LLMParsedTransaction>> {
+): Promise<ParserOutcome> {
   const results = new Map<string, LLMParsedTransaction>();
-  if (emails.length === 0) return results;
+  if (emails.length === 0) return { results, providerFailed: false };
 
   const apiKey = config?.nvidiaKey || process.env.NVIDIA_API_KEY;
   if (!apiKey) {
     console.warn("[NVIDIA] No API key configured. Skipping NVIDIA fallback.");
-    return results;
+    return { results, providerFailed: true, failureReason: "no_nvidia_key" };
   }
 
   const targetModel = config?.nvidiaModel || "google/gemma-3n-e4b-it";
@@ -111,7 +122,7 @@ ${emailsBlock}
     if (!response.ok) {
       const errText = await response.text();
       console.warn(`[NVIDIA] API failed (${response.status}): ${errText.slice(0, 300)}`);
-      return results;
+      return { results, providerFailed: true, failureReason: `nvidia_http_${response.status}` };
     }
 
     const data = await response.json();
@@ -119,7 +130,7 @@ ${emailsBlock}
 
     console.log(`[NVIDIA] Raw response: ${outputString.slice(0, 600)}...`);
 
-    let parsedArray: any[] = [];
+    let parsedArray: any[] | null = null;
     try {
       parsedArray = JSON.parse(outputString);
     } catch (e1: any) {
@@ -140,32 +151,37 @@ ${emailsBlock}
       }
     }
 
-    if (Array.isArray(parsedArray)) {
-      console.log(`[NVIDIA] Parsed ${parsedArray.length} items:`);
+    if (!Array.isArray(parsedArray)) {
+      // Model produced no usable JSON at all — a provider failure, not
+      // "these emails contain no transactions".
+      return { results, providerFailed: true, failureReason: "nvidia_unparseable_response" };
+    }
 
-      for (const item of parsedArray) {
-        console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
+    console.log(`[NVIDIA] Parsed ${parsedArray.length} items:`);
 
-        if (!item.emailId || !item.amount || Number(item.amount) <= 0) continue;
+    for (const item of parsedArray) {
+      console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
 
-        results.set(item.emailId, {
-          amount: Number(item.amount),
-          type: item.type === "income" ? "income" : "expense",
-          merchant: item.merchant || "Bank Transaction",
-          date: item.date || new Date().toISOString().split("T")[0],
-          accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
-          confidence: 0.80,
-          categoryId: item.categoryId || undefined,
-          newCategory: item.newCategory || undefined,
-        });
-      }
+      if (!item.emailId || !item.amount || Number(item.amount) <= 0) continue;
+
+      results.set(item.emailId, {
+        amount: Number(item.amount),
+        type: item.type === "income" ? "income" : "expense",
+        merchant: item.merchant || "Bank Transaction",
+        date: item.date || new Date().toISOString().split("T")[0],
+        accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
+        confidence: 0.80,
+        categoryId: item.categoryId || undefined,
+        newCategory: item.newCategory || undefined,
+      });
     }
 
     console.log(`[NVIDIA ✓] ${results.size}/${emails.length} transactions extracted via NVIDIA NIM`);
 
   } catch (err) {
     console.error("[NVIDIA] Parsing failed:", err);
+    return { results, providerFailed: true, failureReason: "nvidia_exception" };
   }
 
-  return results;
+  return { results, providerFailed: false };
 }
