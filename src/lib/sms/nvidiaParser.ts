@@ -47,17 +47,28 @@ interface SmsForParsing {
   sender?: string;
 }
 
+export interface ParserOutcome {
+  results: Map<string, LLMParsedTransaction>;
+  /**
+   * true when the provider itself failed (no key configured, API error,
+   * unparseable response) — distinct from a successful call that found no
+   * transactions in the input.
+   */
+  providerFailed: boolean;
+  failureReason?: string;
+}
+
 export async function parseSmsWithNvidia(
   messages: SmsForParsing[],
   config?: any
-): Promise<Map<string, LLMParsedTransaction>> {
+): Promise<ParserOutcome> {
   const results = new Map<string, LLMParsedTransaction>();
-  if (messages.length === 0) return results;
+  if (messages.length === 0) return { results, providerFailed: false };
 
   const apiKey = config?.nvidiaKey || process.env.NVIDIA_API_KEY;
   if (!apiKey) {
     console.warn("[SMS-NVIDIA] No API key configured. Skipping NVIDIA fallback.");
-    return results;
+    return { results, providerFailed: true, failureReason: "no_nvidia_key" };
   }
 
   const targetModel = config?.nvidiaModel || "google/gemma-3n-e4b-it";
@@ -118,7 +129,7 @@ ${messagesBlock}
     if (!response.ok) {
       const errText = await response.text();
       console.warn(`[SMS-NVIDIA] API failed (${response.status}): ${errText.slice(0, 300)}`);
-      return results;
+      return { results, providerFailed: true, failureReason: `nvidia_http_${response.status}` };
     }
 
     const data = await response.json();
@@ -126,7 +137,7 @@ ${messagesBlock}
 
     console.log(`[SMS-NVIDIA] Raw response: ${outputString.slice(0, 600)}...`);
 
-    let parsedArray: any[] = [];
+    let parsedArray: any[] | null = null;
     try {
       parsedArray = JSON.parse(outputString);
     } catch (e1: any) {
@@ -147,43 +158,48 @@ ${messagesBlock}
       }
     }
 
-    if (Array.isArray(parsedArray)) {
-      console.log(`[SMS-NVIDIA] Parsed ${parsedArray.length} items:`);
+    if (!Array.isArray(parsedArray)) {
+      // Model produced no usable JSON at all — a provider failure, not
+      // "this SMS contains no transaction".
+      return { results, providerFailed: true, failureReason: "nvidia_unparseable_response" };
+    }
 
-      const knownIds = new Set(messages.map(m => m.id));
+    console.log(`[SMS-NVIDIA] Parsed ${parsedArray.length} items:`);
 
-      for (let i = 0; i < parsedArray.length; i++) {
-        const item = parsedArray[i];
-        console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
+    const knownIds = new Set(messages.map(m => m.id));
 
-        if (!item.amount || Number(item.amount) <= 0) continue;
+    for (let i = 0; i < parsedArray.length; i++) {
+      const item = parsedArray[i];
+      console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
 
-        // Resolve the map key: use the model's emailId if it matches a known input ID,
-        // otherwise fall back to the positional input ID (models often misquote UUIDs).
-        const mapKey = knownIds.has(item.emailId)
-          ? item.emailId
-          : (messages[i]?.id ?? item.emailId);
+      if (!item.amount || Number(item.amount) <= 0) continue;
 
-        if (!mapKey) continue;
+      // Resolve the map key: use the model's emailId if it matches a known input ID,
+      // otherwise fall back to the positional input ID (models often misquote UUIDs).
+      const mapKey = knownIds.has(item.emailId)
+        ? item.emailId
+        : (messages[i]?.id ?? item.emailId);
 
-        results.set(mapKey, {
-          amount: Number(item.amount),
-          type: item.type === "income" ? "income" : "expense",
-          merchant: item.merchant || "Bank Transaction",
-          date: item.date || new Date().toISOString().split("T")[0],
-          accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
-          confidence: 0.80,
-          categoryId: item.categoryId || undefined,
-          newCategory: item.newCategory || undefined,
-        });
-      }
+      if (!mapKey) continue;
+
+      results.set(mapKey, {
+        amount: Number(item.amount),
+        type: item.type === "income" ? "income" : "expense",
+        merchant: item.merchant || "Bank Transaction",
+        date: item.date || new Date().toISOString().split("T")[0],
+        accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
+        confidence: 0.80,
+        categoryId: item.categoryId || undefined,
+        newCategory: item.newCategory || undefined,
+      });
     }
 
     console.log(`[SMS-NVIDIA ✓] ${results.size}/${messages.length} transactions extracted via NVIDIA NIM`);
 
   } catch (err) {
     console.error("[SMS-NVIDIA] Parsing failed:", err);
+    return { results, providerFailed: true, failureReason: "nvidia_exception" };
   }
 
-  return results;
+  return { results, providerFailed: false };
 }

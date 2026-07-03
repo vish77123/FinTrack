@@ -342,6 +342,7 @@ export async function syncGmailAction() {
   // ── PHASE 2: Batch LLM for regex failures ──────────
   const regexFailures = emailsToProcess.filter(e => !e.regexResult);
   let llmResultsMap = new Map<string, any>();
+  let llmWarning: string | null = null;
 
   if (regexFailures.length > 0 && llmEnabled) {
     console.log(`[SYNC] ${regexFailures.length} regex failures → sending to AI Parsers`);
@@ -360,15 +361,29 @@ export async function syncGmailAction() {
 
     if (settings?.selected_llm_provider === "nvidia") {
       console.log(`[SYNC] User preferred primary provider: NVIDIA NIM`);
-      llmResultsMap = await parseBatchWithNvidia(emailsForLLM, config);
+      const nvidia = await parseBatchWithNvidia(emailsForLLM, config);
+      llmResultsMap = nvidia.results;
+      if (nvidia.providerFailed) {
+        llmWarning = `AI parsing unavailable (${nvidia.failureReason || "unknown"}) — ${emailsForLLM.length} email(s) left unparsed. They will be retried on the next sync.`;
+      }
     } else {
       console.log(`[SYNC] User preferred primary provider: Google Gemini`);
-      llmResultsMap = await parseBatchWithLLM(emailsForLLM, config);
-      if (llmResultsMap.size === 0) {
-        console.log(`[SYNC] Gemini exhausted. Gracefully failing over to NVIDIA NIM...`);
-        llmResultsMap = await parseBatchWithNvidia(emailsForLLM, config);
+      const gemini = await parseBatchWithLLM(emailsForLLM, config);
+      llmResultsMap = gemini.results;
+
+      // Fail over only when Gemini itself failed — an empty result from a
+      // healthy call means these emails contained no transactions.
+      if (gemini.providerFailed) {
+        console.log(`[SYNC] Gemini failed (${gemini.failureReason || "unknown"}). Failing over to NVIDIA NIM...`);
+        const nvidia = await parseBatchWithNvidia(emailsForLLM, config);
+        llmResultsMap = nvidia.results;
+        if (nvidia.providerFailed) {
+          llmWarning = `AI parsing unavailable (Gemini: ${gemini.failureReason || "unknown"}; NVIDIA: ${nvidia.failureReason || "unknown"}) — ${emailsForLLM.length} email(s) left unparsed. They will be retried on the next sync.`;
+        }
       }
     }
+
+    if (llmWarning) console.warn(`[SYNC] ${llmWarning}`);
   }
 
   // Cache of category name (lowercased) → id. Seed it with the user's EXISTING
@@ -545,7 +560,7 @@ export async function syncGmailAction() {
         }
       }
     } else {
-      await supabase
+      const { error: pendingError } = await supabase
         .from("pending_transactions")
         .insert({
           user_id: user.id,
@@ -562,7 +577,15 @@ export async function syncGmailAction() {
           raw_snippet: parsed.rawSnippet || email.fullText.slice(0, 200),
           parsed_by: parsedBy,
         });
-      newCount++;
+
+      if (!pendingError) {
+        newCount++;
+      } else if (pendingError.code === "23505") {
+        // Unique constraint: a concurrent sync already imported this email
+        skippedCount++;
+      } else {
+        console.error(`[SYNC] Failed to save pending transaction:`, pendingError.message);
+      }
     }
   }
 
@@ -582,6 +605,7 @@ export async function syncGmailAction() {
     newTransactions: newCount,
     skipped: skippedCount,
     total: messages.length,
+    warning: llmWarning || undefined,
   };
 }
 

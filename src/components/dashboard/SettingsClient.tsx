@@ -381,8 +381,11 @@ export function SettingsClient() {
                   startTransition(async () => {
                     const res = await syncGmailAction();
                     if (res.error) { setSyncMsg(res.error); }
-                    else { setSyncMsg(`Synced! ${res.newTransactions} new, ${res.skipped} skipped`); router.refresh(); }
-                    setTimeout(() => setSyncMsg(""), 5000);
+                    else {
+                      setSyncMsg(`Synced! ${res.newTransactions} new, ${res.skipped} skipped${res.warning ? ` — ⚠️ ${res.warning}` : ""}`);
+                      router.refresh();
+                    }
+                    setTimeout(() => setSyncMsg(""), res.warning ? 12000 : 5000);
                   });
                 }}>
                   <div className={styles.itemLeft}>
