@@ -1,5 +1,5 @@
--- Dedup guarantees + lookup indexes (Phase 1 of the stability plan,
--- docs/05-stability-audit.md findings 5 and 9).
+-- 023: dedup_constraints_and_indexes — Phase 1 of the stability plan
+-- (docs/05-stability-audit.md findings 5 and 9).
 --
 -- The email/SMS dedup was previously enforced only by application-level
 -- SELECT-then-INSERT checks, which race: concurrent webhook deliveries
@@ -8,8 +8,8 @@
 -- database guarantee; application code treats a unique violation (23505)
 -- as a clean "already imported" outcome.
 --
--- NOTE: apply this migration BEFORE deploying the application code that
--- relies on it (same rule as the atomic-balance migration).
+-- IMPORTANT: apply this migration BEFORE deploying the app code that relies
+-- on it (same rule as 022_atomic_balance_updates.sql).
 
 -- ── 1. Clean up any existing duplicates first (unique index creation would
 --       fail otherwise). Keeps the lowest-id row per duplicate group; the

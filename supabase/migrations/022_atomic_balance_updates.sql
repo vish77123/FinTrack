@@ -1,4 +1,4 @@
--- Atomic balance adjustment functions.
+-- 022: atomic_balance_updates — race-free account balance adjustments
 --
 -- Balances were previously updated by reading the current value into JS,
 -- adding the delta, and writing the result back. Two concurrent mutations
@@ -6,15 +6,16 @@
 -- the same starting value and one update would be silently lost.
 --
 -- These functions apply the delta inside a single UPDATE statement, so
--- concurrent callers serialize on the row and no update is lost.
+-- concurrent callers serialize on the row and no update is lost. Called from
+-- src/lib/balance.ts, which replaces the read-modify-write helpers that
+-- previously lived in actions/transactions.ts and actions/gmail.ts.
 --
 -- Both run as SECURITY INVOKER: row-level security on `accounts` still
 -- decides which rows the caller may touch.
 --
--- NOTE: this migration must be applied to the Supabase project before
--- deploying the application code that calls these functions
--- (src/lib/balance.ts). Until it is applied, balance updates will fail
--- with a visible error instead of silently drifting.
+-- IMPORTANT: apply this migration BEFORE deploying the app code that calls
+-- these functions. Until it is applied, balance updates fail with a visible
+-- error instead of silently drifting.
 
 create or replace function public.increment_account_balance(
   p_account_id uuid,

@@ -116,10 +116,12 @@ No test framework exists. Highest-value targets if tests are added (all pure or 
 
 ## Remediation Status & Phase Roadmap
 
-> Updated 2026-07-02.
+> Updated 2026-07-03. Migration files use this repo's numbered convention
+> (`NNN_name.sql`); Phase 0's migration was originally shipped with a
+> timestamp filename and later renamed to `022_...` to match.
 
 ### Phase 0 — P0 financial-correctness fixes ✅ DONE
-Commit `8b99a74` on `claude/claude-md-review-0zcid0` (PR #1 → `uat`):
+Merged into `uat` via PR #1:
 - Atomic balance updates via Postgres RPCs (`increment_account_balance`,
   `increment_cc_outstanding`) — new shared helper `src/lib/balance.ts`.
 - Row-update-before-balance ordering; payload validation before destructive
@@ -131,14 +133,13 @@ Commit `8b99a74` on `claude/claude-md-review-0zcid0` (PR #1 → `uat`):
 - CC `outstanding_balance` no longer floored at 0 (apply/reverse now exact
   inverses; dashboard clamps negatives for display).
 
-**Deploy gate:** apply
-`supabase/migrations/20260702120000_atomic_balance_updates.sql` to the
-Supabase project BEFORE deploying this code, then smoke-test one
+**Deploy gate:** apply `supabase/migrations/022_atomic_balance_updates.sql`
+to the Supabase project BEFORE deploying this code, then smoke-test one
 add / edit / delete / pending-approval on a bank account and a credit card.
 
 ### Phase 1 — DB-level integrity + silent-failure fixes ✅ DONE
-1. Migration `20260702150000_dedup_constraints_and_indexes.sql`: partial
-   unique indexes on `pending_transactions(user_id, source_email_id)` and
+1. Migration `023_dedup_constraints_and_indexes.sql`: partial unique indexes
+   on `pending_transactions(user_id, source_email_id)` and
    `(user_id, raw_sms_id)` — dedup is now a database guarantee (findings
    5/9); webhook, retry, and sync treat a unique violation (23505) as a
    clean "already imported". Plus lookup indexes on
@@ -155,8 +156,8 @@ add / edit / delete / pending-approval on a bank account and a credit card.
    shown in Settings; `getCredentials` distinguishes "not connected" from a
    real lookup failure and the Investments banner shows the true cause.
 
-**Deploy gate:** apply the dedup migration BEFORE deploying, same rule as
-Phase 0.
+**Deploy gate:** apply `023_dedup_constraints_and_indexes.sql` BEFORE
+deploying, same rule as Phase 0.
 
 ### Phase 2 — Scalability (finding 8) (NEXT)
 4. Bound the dashboard transaction fetch; push aggregates into SQL; stop

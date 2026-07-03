@@ -373,7 +373,6 @@ export async function convertToSplitAction(idOrGroupId: string, formData: FormDa
     sourceEmailId = existing.source_email_id ?? null;
   }
 
-
   const splitGroupId = crypto.randomUUID();
 
   // Insert each (pre-validated) split; stamp source_email_id only on the
