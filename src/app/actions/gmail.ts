@@ -188,11 +188,17 @@ export async function syncGmailAction() {
     .select("id, name, type")
     .eq("user_id", user.id);
 
+  // Most recent 500 categorized transactions only — recent merchant labels
+  // are the strongest categorization signal, and an unbounded fetch here
+  // grows forever under auto-ingest (each email below does a linear scan
+  // over this list).
   const { data: history } = await supabase
     .from("transactions")
     .select("note, category_id")
     .eq("user_id", user.id)
-    .not("category_id", "is", null);
+    .not("category_id", "is", null)
+    .order("date", { ascending: false })
+    .limit(500);
 
   const historicalMappings = history || [];
 
@@ -239,6 +245,7 @@ export async function syncGmailAction() {
 
   let newCount = 0;
   let skippedCount = 0;
+  let fetchFailureCount = 0;
 
   // ── PHASE 1: Batch dedup → parallel message fetch → regex ──────────
   interface EmailData {
@@ -276,21 +283,37 @@ export async function syncGmailAction() {
     skippedCount = messages.length - messagesToFetch.length;
     console.log(`[SYNC] ${messagesToFetch.length} emails to fetch (${skippedCount} dupes skipped)`);
 
-    // Fetch all non-dupe message bodies in parallel
-    const fetchedMessages = await Promise.all(
-      messagesToFetch.map(async (msg: any) => {
-        try {
-          const msgRes = await fetch(
-            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
-            { headers: { Authorization: `Bearer ${accessToken}` } }
-          );
-          if (!msgRes.ok) return null;
-          return { msgId: msg.id as string, data: await msgRes.json() };
-        } catch {
-          return null;
-        }
-      })
-    );
+    // Fetch non-dupe message bodies in bounded batches. A single unbounded
+    // Promise.all of up to 200 requests spikes Gmail quota and invites 429s;
+    // failures are counted (not silently dropped) and surfaced as a warning
+    // below — the affected emails are simply retried on the next sync since
+    // no pending row is created for them.
+    const FETCH_BATCH_SIZE = 10;
+    const fetchedMessages = [];
+    for (let i = 0; i < messagesToFetch.length; i += FETCH_BATCH_SIZE) {
+      const batch = messagesToFetch.slice(i, i + FETCH_BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(async (msg: any) => {
+          try {
+            const msgRes = await fetch(
+              `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
+              { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+            if (!msgRes.ok) {
+              console.error(`[SYNC] Message fetch failed (${msgRes.status}) for ${msg.id}`);
+              fetchFailureCount++;
+              return null;
+            }
+            return { msgId: msg.id as string, data: await msgRes.json() };
+          } catch (err) {
+            console.error(`[SYNC] Message fetch threw for ${msg.id}:`, err);
+            fetchFailureCount++;
+            return null;
+          }
+        })
+      );
+      fetchedMessages.push(...batchResults);
+    }
 
     for (const fetched of fetchedMessages) {
       if (!fetched) continue;
@@ -598,14 +621,22 @@ export async function syncGmailAction() {
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
 
-  console.log(`[SYNC] Done! ${newCount} new, ${skippedCount} skipped, ${messages.length} total`);
+  console.log(`[SYNC] Done! ${newCount} new, ${skippedCount} skipped, ${fetchFailureCount} fetch failures, ${messages.length} total`);
+
+  const warnings: string[] = [];
+  if (llmWarning) warnings.push(llmWarning);
+  if (fetchFailureCount > 0) {
+    warnings.push(
+      `${fetchFailureCount} email(s) couldn't be fetched from Gmail and were skipped this run. They will be retried on the next sync.`
+    );
+  }
 
   return {
     success: true,
     newTransactions: newCount,
     skipped: skippedCount,
     total: messages.length,
-    warning: llmWarning || undefined,
+    warning: warnings.length > 0 ? warnings.join(" ") : undefined,
   };
 }
 

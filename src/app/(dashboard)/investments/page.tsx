@@ -1,12 +1,9 @@
 import { getInvestmentsData } from "@/lib/data/investments";
 import InvestmentsView from "@/components/dashboard/InvestmentsView";
-import { getDashboardData } from "@/lib/data/dashboard";
+import { CURRENCY_SYMBOL } from "@/lib/currency";
 
 export default async function InvestmentsPage() {
-  const [investments, dashboard] = await Promise.all([
-    getInvestmentsData(),
-    getDashboardData(),
-  ]);
+  const investments = await getInvestmentsData();
 
-  return <InvestmentsView data={investments} currency={dashboard.currency} />;
+  return <InvestmentsView data={investments} currency={CURRENCY_SYMBOL} />;
 }

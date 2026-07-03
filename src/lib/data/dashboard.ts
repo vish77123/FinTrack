@@ -1,5 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
 import { mockData } from "@/lib/mockData";
+import { CURRENCY_SYMBOL } from "@/lib/currency";
+
+// How far back the dashboard/transactions row fetch reaches. Everything the
+// dashboard computes from raw rows (recent list, CC billing cycles ≤ ~1 month)
+// fits well inside this window; month/today totals and the spending donut come
+// from the get_dashboard_aggregates RPC so they stay exact regardless of it.
+const TXN_WINDOW_DAYS = 90;
+// Hard row cap inside the window — protects serverless memory against
+// pathological ingest volume. Newest rows win (query is date-descending).
+const TXN_FETCH_LIMIT = 1000;
 
 // ─────────────────────────────────────────────────────────────
 // CREDIT CARD BILLING CYCLE HELPERS
@@ -146,12 +156,25 @@ export async function getDashboardData() {
   }
 
   try {
+    // Time boundaries shared by the bounded row fetch, the SQL aggregates,
+    // and the JS fallback below. Same server-local-midnight semantics the
+    // old in-JS computation used.
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+    const windowStart = new Date(todayStart);
+    windowStart.setDate(windowStart.getDate() - TXN_WINDOW_DAYS);
+
     // Run all queries in parallel for faster data loading
     const [
       { data: accountsRaw },
       { data: transactionsRaw },
       { data: goalsRaw },
-      { data: categoriesRaw }
+      { data: categoriesRaw },
+      { data: aggregates, error: aggregatesError },
     ] = await Promise.all([
       supabase
         .from("accounts")
@@ -168,7 +191,9 @@ export async function getDashboardData() {
           transfer_account:accounts!transactions_transfer_to_account_id_fkey(name, type)
         `)
         .eq("user_id", user.id)
-        .order("date", { ascending: false }),
+        .gte("date", windowStart.toISOString())
+        .order("date", { ascending: false })
+        .limit(TXN_FETCH_LIMIT),
       supabase
         .from("savings_goals")
         .select("*")
@@ -178,6 +203,13 @@ export async function getDashboardData() {
         .select("id, name, icon, color, type, sort_order")
         .eq("user_id", user.id)
         .order("sort_order", { ascending: true }),
+      // Month/today totals + category spending, aggregated in Postgres so
+      // they stay exact no matter how the row fetch above is bounded.
+      supabase.rpc("get_dashboard_aggregates", {
+        p_month_start: monthStart.toISOString(),
+        p_day_start: todayStart.toISOString(),
+        p_day_end: todayEnd.toISOString(),
+      }),
     ]);
 
     // 5. Fallback if user's account is absolutely brand new (no data at all)
@@ -216,29 +248,54 @@ export async function getDashboardData() {
     const totalCCDebt = ccAccounts.reduce((sum, acc) => sum + Math.max(0, Number(acc.outstanding_balance) || 0), 0);
     const ccCardCount = ccAccounts.length;
 
-    // A1. Today's Spent Calculation
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let todaySpent = 0;
-
-    // A2. Calculate Income, Expenses, and Savings for the current month
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // A1/A2. Month income/expenses, today's spend, and category spending —
+    // computed in Postgres (get_dashboard_aggregates). JS fallback below runs
+    // only if the RPC is missing (migration 024 not applied yet); the bounded
+    // window fully contains month-to-date, so the fallback is equally exact.
     let totalIncome = 0;
     let totalExpenses = 0;
-    (transactionsRaw || []).forEach(txn => {
-      const txnDate = new Date(txn.date);
-      if (txnDate >= monthStart) {
-        if (txn.type === 'income') totalIncome += Number(txn.amount);
-        if (txn.type === 'expense') totalExpenses += Number(txn.amount);
-      }
-      
-      const justDate = new Date(txn.date);
-      justDate.setHours(0, 0, 0, 0);
-      if (justDate.getTime() === today.getTime() && txn.type === 'expense') {
-        todaySpent += Number(txn.amount);
-      }
-    });
+    let todaySpent = 0;
+    let formattedSpending: { name: string; value: number; color: string }[] = [];
+
+    if (!aggregatesError && aggregates) {
+      totalIncome = Number(aggregates.income) || 0;
+      totalExpenses = Number(aggregates.expenses) || 0;
+      todaySpent = Number(aggregates.today_spent) || 0;
+      const spendingRows: { name: string; value: number | string; color: string | null }[] =
+        aggregates.spending || [];
+      formattedSpending = spendingRows.map(s => ({
+        name: s.name,
+        value: Number(s.value) || 0,
+        color: s.color || "#888",
+      }));
+    } else {
+      console.error(
+        "[DASHBOARD] get_dashboard_aggregates RPC failed (is migration 024 applied?):",
+        aggregatesError?.message
+      );
+      const spendingMap = new Map<string, { name: string; value: number; color: string }>();
+      (transactionsRaw || []).forEach(txn => {
+        const txnDate = new Date(txn.date);
+        if (txnDate >= monthStart) {
+          if (txn.type === 'income') totalIncome += Number(txn.amount);
+          if (txn.type === 'expense') totalExpenses += Number(txn.amount);
+          if (txn.type === 'expense' && txn.categories) {
+            const cat = txn.categories.name;
+            if (!spendingMap.has(cat)) {
+              spendingMap.set(cat, { name: cat, value: 0, color: txn.categories.color || "#888" });
+            }
+            spendingMap.get(cat)!.value += Number(txn.amount);
+          }
+        }
+
+        const justDate = new Date(txn.date);
+        justDate.setHours(0, 0, 0, 0);
+        if (justDate.getTime() === todayStart.getTime() && txn.type === 'expense') {
+          todaySpent += Number(txn.amount);
+        }
+      });
+      formattedSpending = Array.from(spendingMap.values()).sort((a, b) => b.value - a.value);
+    }
     const totalSavings = totalIncome - totalExpenses;
 
     // B. Group Transactions by Date (Building the 'recentTransactions' array shape)
@@ -314,24 +371,9 @@ export async function getDashboardData() {
       targetDate: g.target_date
     }));
 
-    // E. (Optional/Future) Call the RPC for precise category calculations. 
-    // Right now, we construct a generic spending array from the raw transactions for Donut Charts
-    const spendingMap = new Map();
-    (transactionsRaw || []).forEach(txn => {
-      const txnDate = new Date(txn.date);
-      if (txn.type === 'expense' && txn.categories && txnDate >= monthStart) {
-        const cat = txn.categories.name;
-        if (!spendingMap.has(cat)) {
-          spendingMap.set(cat, { name: cat, value: 0, color: txn.categories.color || "#888" });
-        }
-        spendingMap.get(cat).value += Number(txn.amount);
-      }
-    });
-    const formattedSpending = Array.from(spendingMap.values()).sort((a,b) => b.value - a.value);
-
     // Return the perfectly molded Live Data matching the required UI interface!
     return {
-      currency: "₹",
+      currency: CURRENCY_SYMBOL,
       netWorth,
       todaySpent,
       income: totalIncome,
@@ -344,7 +386,7 @@ export async function getDashboardData() {
       categories: (categoriesRaw || []).filter((c: any) => c.sort_order !== -9999),
       recentTransactions: groupedTxns,
       savingsGoals: formattedGoals,
-      spendingData: formattedSpending.length > 0 ? formattedSpending : []
+      spendingData: formattedSpending
     };
 
   } catch (error) {
@@ -358,15 +400,18 @@ export async function getDashboardData() {
 }
 
 /**
- * Fetch ALL transactions for the Reports page (no limit).
- * Returns a flat array of transaction objects with category/account metadata.
+ * Fetch transactions for the Reports page, bounded to the widest range the
+ * UI can display: ReportsView's filters top out at "This Year" / a 365-day
+ * custom range, and its bar chart looks back 6 months — all inside one year.
+ * Previously this fetched the user's entire history, which grows without
+ * limit under email/SMS auto-ingest.
  */
 export async function getReportsData() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const isPlaceholder = supabaseUrl.includes("placeholder");
 
   if (isPlaceholder) {
-    return { transactions: [], currency: "₹" };
+    return { transactions: [], currency: CURRENCY_SYMBOL };
   }
 
   const supabase = await createClient();
@@ -375,6 +420,10 @@ export async function getReportsData() {
   if (!user) {
     throw new Error("Unauthorized");
   }
+
+  const reportsWindowStart = new Date();
+  reportsWindowStart.setHours(0, 0, 0, 0);
+  reportsWindowStart.setDate(reportsWindowStart.getDate() - 366);
 
   const { data: txns } = await supabase
     .from("transactions")
@@ -385,7 +434,9 @@ export async function getReportsData() {
       transfer_account:accounts!transactions_transfer_to_account_id_fkey(name, type)
     `)
     .eq("user_id", user.id)
-    .order("date", { ascending: false });
+    .gte("date", reportsWindowStart.toISOString())
+    .order("date", { ascending: false })
+    .limit(10000);
 
   const transactions = (txns || []).map(txn => ({
     id: txn.id,
@@ -407,5 +458,5 @@ export async function getReportsData() {
     original_synced_name: txn.original_synced_name
   }));
 
-  return { transactions, currency: "₹" };
+  return { transactions, currency: CURRENCY_SYMBOL };
 }

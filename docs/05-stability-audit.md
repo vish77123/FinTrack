@@ -159,11 +159,39 @@ add / edit / delete / pending-approval on a bank account and a credit card.
 **Deploy gate:** apply `023_dedup_constraints_and_indexes.sql` BEFORE
 deploying, same rule as Phase 0.
 
-### Phase 2 — Scalability (finding 8) (NEXT)
-4. Bound the dashboard transaction fetch; push aggregates into SQL; stop
-   `/investments` calling `getDashboardData()` for a currency symbol.
-5. Tame Gmail sync: cap historical-mappings query, chunk parallel body
-   fetches (~10 at a time), report partial-fetch failures.
+### Phase 2 — Scalability (finding 8) ✅ DONE
+4. Dashboard/reports data path bounded:
+   - Migration `024_dashboard_aggregates.sql`: `get_dashboard_aggregates`
+     RPC computes month income/expenses, today's spend, and the
+     category-spending donut in Postgres (uses `idx_transactions_user_date`
+     from 023), so totals stay exact regardless of how the row fetch is
+     bounded. If the RPC is missing, the app logs an error and falls back
+     to JS aggregation over the bounded window (equally exact, since the
+     window contains all of month-to-date).
+   - `getDashboardData` transaction fetch bounded to the last 90 days,
+     capped at 1,000 rows (newest first). Covers everything computed from
+     raw rows: the recent list and CC billing cycles (≤ ~1 month). The
+     /transactions page now shows the last 90 days of history.
+   - `getReportsData` bounded to the last 366 days (ReportsView's widest
+     UI range is "This Year" / a 365-day custom window), capped at
+     10,000 rows.
+   - `/investments` no longer runs the whole dashboard pipeline for a
+     currency symbol — the symbol lives in `src/lib/currency.ts`
+     (`CURRENCY_SYMBOL`), shared by the dashboard data layer.
+5. Gmail sync tamed:
+   - Historical-mappings query capped to the 500 most recent categorized
+     transactions (was: every categorized transaction ever, scanned
+     linearly per email).
+   - Message-body fetches chunked 10 at a time instead of one unbounded
+     `Promise.all` of up to 200 requests.
+   - Fetch failures are counted and surfaced in the sync result's
+     `warning` (shown in Settings) instead of being silently dropped;
+     failed emails are retried on the next sync since no pending row is
+     created for them.
+
+**Deploy gate:** apply `024_dashboard_aggregates.sql` BEFORE deploying,
+same rule as 022/023. (Not strictly breaking — the app falls back to JS
+aggregation with an error log until it's applied.)
 
 ### Phase 3 — Structural (findings 6, 13)
 6. Rate-limiter redesign; merge duplicated email/SMS Gemini parsers.
