@@ -209,6 +209,12 @@ export async function POST(request: Request) {
         });
 
       if (insertError) {
+        if (insertError.code === "23505") {
+          // Unique constraint on (user_id, raw_sms_id): a concurrent delivery
+          // of the same SMS already created the pending transaction.
+          console.log(`[SMS-API] Dedup (unique constraint): pending transaction already exists for SMS ${smsId}`);
+          return Response.json({ success: true, smsId, parsed: true, dedup: true });
+        }
         console.error(`[SMS-API] Failed to insert pending transaction:`, insertError);
         return Response.json({ success: true, smsId, parsed: true, saved: false, error: insertError.message });
       }

@@ -136,19 +136,29 @@ Commit `8b99a74` on `claude/claude-md-review-0zcid0` (PR #1 → `uat`):
 Supabase project BEFORE deploying this code, then smoke-test one
 add / edit / delete / pending-approval on a bank account and a credit card.
 
-### Phase 1 — DB-level integrity + silent-failure fixes (NEXT)
-1. Migration: unique constraints on `pending_transactions(user_id,
-   source_email_id)` and `(user_id, raw_sms_id)` (closes findings 5/9 at the
-   DB layer; webhook/sync treat unique-violation as clean dedup) + indexes on
+### Phase 1 — DB-level integrity + silent-failure fixes ✅ DONE
+1. Migration `20260702150000_dedup_constraints_and_indexes.sql`: partial
+   unique indexes on `pending_transactions(user_id, source_email_id)` and
+   `(user_id, raw_sms_id)` — dedup is now a database guarantee (findings
+   5/9); webhook, retry, and sync treat a unique violation (23505) as a
+   clean "already imported". Plus lookup indexes on
    `profiles(webhook_secret)`, `transactions(user_id, date)`,
-   `source_email_id`, `raw_sms_id`, `split_group_id`.
-2. Fix Zerodha callback `NEXT_REDIRECT` catch bug (finding 7) so real error
-   messages reach the user.
-3. Fallback honesty (finding 7): distinguish "not connected" from "lookup
-   failed" in `getCredentials`; NVIDIA failover on actual failure rather than
-   empty results; visible signal when NVIDIA key is missing.
+   `source_email_id`, `raw_sms_id`, `split_group_id`, and
+   `pending_transactions(user_id, status)`.
+2. Zerodha callback rewritten: `redirect()` calls moved out of try/catch
+   (they work by throwing `NEXT_REDIRECT`, which the old catch swallowed);
+   lost-session and failed credential saves now surface real errors.
+3. Fallback honesty: all four LLM parsers return
+   `{ results, providerFailed, failureReason }` — failover happens only on
+   actual provider failure (not on "no transactions found"); a missing
+   NVIDIA key is an explicit failure; the sync result carries a `warning`
+   shown in Settings; `getCredentials` distinguishes "not connected" from a
+   real lookup failure and the Investments banner shows the true cause.
 
-### Phase 2 — Scalability (finding 8)
+**Deploy gate:** apply the dedup migration BEFORE deploying, same rule as
+Phase 0.
+
+### Phase 2 — Scalability (finding 8) (NEXT)
 4. Bound the dashboard transaction fetch; push aggregates into SQL; stop
    `/investments` calling `getDashboardData()` for a currency symbol.
 5. Tame Gmail sync: cap historical-mappings query, chunk parallel body

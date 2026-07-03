@@ -213,11 +213,27 @@ function sanitize(text: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════
+// PARSER OUTCOME
+// ═══════════════════════════════════════════════════════════
+
+export interface ParserOutcome {
+  results: Map<string, LLMParsedTransaction>;
+  /**
+   * true when the provider itself failed (no keys configured, rate limits
+   * exhausted, API error, unparseable response) — distinct from a successful
+   * call that found no transactions in the input. Callers should only fail
+   * over to another provider when this is true.
+   */
+  providerFailed: boolean;
+  failureReason?: string;
+}
+
+// ═══════════════════════════════════════════════════════════
 // SINGLE EMAIL PARSE (compatibility)
 // ═══════════════════════════════════════════════════════════
 
 export async function parseWithLLM(snippet: string): Promise<LLMParsedTransaction | null> {
-  const results = await parseBatchWithLLM([{ id: "single", text: snippet }]);
+  const { results } = await parseBatchWithLLM([{ id: "single", text: snippet }]);
   return results.get("single") || null;
 }
 
@@ -233,12 +249,14 @@ interface EmailForParsing {
 export async function parseBatchWithLLM(
   emails: EmailForParsing[],
   config?: any
-): Promise<Map<string, LLMParsedTransaction>> {
+): Promise<ParserOutcome> {
   const results = new Map<string, LLMParsedTransaction>();
-  if (emails.length === 0) return results;
+  if (emails.length === 0) return { results, providerFailed: false };
 
   const activeKeys = getRequestKeys(config?.geminiKeys);
-  if (activeKeys.length === 0) return results;
+  if (activeKeys.length === 0) {
+    return { results, providerFailed: true, failureReason: "no_gemini_keys" };
+  }
 
   // Build the prompt — same structure as the working FinTrackPro code
   const emailsBlock = emails.map((email, idx) => `
@@ -320,9 +338,13 @@ ${emailsBlock}
 
     console.log(`[LLM] Raw response: ${outputString?.slice(0, 600) || "(empty)"}`);
 
-    if (!outputString) return results;
+    // null means the provider was unavailable (keys exhausted / API errors),
+    // not that the emails contained no transactions.
+    if (!outputString) {
+      return { results, providerFailed: true, failureReason: "gemini_unavailable" };
+    }
 
-    let parsedArray: any[] = [];
+    let parsedArray: any[] | null = null;
     try {
       parsedArray = JSON.parse(outputString);
     } catch {
@@ -333,12 +355,20 @@ ${emailsBlock}
       } catch {
         const match = cleaned.match(/\[[\s\S]*\]/);
         if (match) {
-          parsedArray = JSON.parse(match[0]);
+          try {
+            parsedArray = JSON.parse(match[0]);
+          } catch {
+            parsedArray = null;
+          }
         }
       }
     }
 
-    if (Array.isArray(parsedArray)) {
+    if (!Array.isArray(parsedArray)) {
+      return { results, providerFailed: true, failureReason: "gemini_unparseable_response" };
+    }
+
+    {
       console.log(`[LLM] Parsed ${parsedArray.length} items:`);
 
       for (const item of parsedArray) {
@@ -363,9 +393,10 @@ ${emailsBlock}
 
   } catch (err) {
     console.error("[LLM] Batch parsing failed:", err);
+    return { results, providerFailed: true, failureReason: "gemini_exception" };
   }
 
-  return results;
+  return { results, providerFailed: false };
 }
 
 /**

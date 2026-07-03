@@ -24,28 +24,44 @@ import type {
   PortfolioSummary,
 } from "@/lib/zerodha/types";
 
-async function getCredentials(): Promise<ZerodhaCredentials | null> {
+interface CredentialsLookup {
+  creds: ZerodhaCredentials | null;
+  /** Set when creds is null: "not_connected" or a real failure description. */
+  reason?: string;
+}
+
+async function getCredentials(): Promise<CredentialsLookup> {
   // Credentials are stored per-user in zerodha_credentials (RLS: auth.uid() = user_id).
   // No env-var fallback — that would expose one user's portfolio to all logged-in users.
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    if (!user) return { creds: null, reason: "not_connected" };
 
-    const { data } = await supabase
+    // maybeSingle: a missing row is a legitimate "not connected", not an error
+    const { data, error } = await supabase
       .from("zerodha_credentials")
       .select("api_key, access_token")
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
+
+    if (error) {
+      // Table missing (migration not applied), RLS problem, or query failure —
+      // this is NOT "not connected"; surface the real cause instead of masking it.
+      console.error("[investments] zerodha_credentials lookup failed:", error.message);
+      return { creds: null, reason: `credentials lookup failed: ${error.message}` };
+    }
 
     if (data?.api_key && data?.access_token) {
-      return { apiKey: data.api_key, accessToken: data.access_token };
+      return { creds: { apiKey: data.api_key, accessToken: data.access_token } };
     }
-  } catch {
-    // Table may not exist yet (migration not applied)
-  }
 
-  return null;
+    return { creds: null, reason: "not_connected" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[investments] credentials lookup threw:", msg);
+    return { creds: null, reason: `credentials lookup failed: ${msg}` };
+  }
 }
 
 function summariseEquity(holdings: EquityHolding[]): PortfolioSummary {
@@ -93,7 +109,7 @@ function combine(a: PortfolioSummary, b: PortfolioSummary): PortfolioSummary {
 }
 
 export async function getInvestmentsData(): Promise<InvestmentsData> {
-  const creds = await getCredentials();
+  const { creds, reason } = await getCredentials();
 
   let equity: EquityHolding[];
   let mutualFunds: MutualFundHolding[];
@@ -102,7 +118,7 @@ export async function getInvestmentsData(): Promise<InvestmentsData> {
 
   if (!creds) {
     source = "mock";
-    mockReason = "not_connected";
+    mockReason = reason || "not_connected";
     equity = mockEquityHoldings;
     mutualFunds = mockMutualFundHoldings;
   } else {

@@ -285,6 +285,11 @@ export async function retrySmsParseAction(smsId: string) {
     });
 
   if (insertError) {
+    if (insertError.code === "23505") {
+      // Unique constraint on (user_id, raw_sms_id): another retry or the
+      // webhook already created the pending transaction.
+      return { error: "A pending transaction already exists for this SMS" };
+    }
     console.error(`[SMS-RETRY] Failed to insert pending transaction:`, insertError);
     return { error: "Parsed successfully but failed to save: " + insertError.message };
   }
