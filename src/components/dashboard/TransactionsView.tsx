@@ -1,32 +1,109 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Plus, Search, Trash2, Pencil, ChevronDown, ChevronUp, SlidersHorizontal, X } from "lucide-react";
 import styles from "./transactions.module.css";
 import { useUIStore } from "@/store/useUIStore";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { deleteTransactionAction, deleteAllSplitSiblingsAction } from "@/app/actions/deleteTransaction";
+import { fetchTransactionsRangeAction } from "@/app/actions/transactionsRange";
+
+const EPOCH_ISO = "1970-01-01T00:00:00.000Z";
 
 interface TransactionsViewProps {
+  /** Day-grouped transactions covering the default fetch window. */
   transactions: any[];
   currency: string;
   categories?: any[];
   accounts?: any[];
+  /** ISO start of the default window the `transactions` prop covers. */
+  windowStart?: string;
 }
 
-export default function TransactionsView({ transactions, currency, categories = [], accounts = [] }: TransactionsViewProps) {
+export default function TransactionsView({ transactions, currency, categories = [], accounts = [], windowStart = EPOCH_ISO }: TransactionsViewProps) {
   const { setTransactionModalOpen, setEditingTransaction } = useUIStore();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  // Filter state
+  // Filter state. Date filter defaults to the server-fetched window ("Last 2
+  // Months"); wider selections ("All Time" / older custom ranges) fetch the
+  // needed range on demand — see the requiredRange effect below.
   const [typeFilter, setTypeFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("window");
   const [customDateRange, setCustomDateRange] = useState({ start: "", end: "" });
+
+  // Data fetched for ranges wider than the default window (null = use the prop)
+  const [olderGroups, setOlderGroups] = useState<any[] | null>(null);
+  const [olderRange, setOlderRange] = useState<{ start: string; end: string | null } | null>(null);
+  const [rangeError, setRangeError] = useState("");
+  const [isLoadingRange, startRangeTransition] = useTransition();
+
+  // Which range (if any) must be fetched from the server because the default
+  // window doesn't contain it.
+  const requiredRange = useMemo(() => {
+    if (dateFilter === "all") {
+      return { start: EPOCH_ISO, end: null as string | null };
+    }
+    if (dateFilter === "custom") {
+      if (!customDateRange.start && !customDateRange.end) return null; // nothing entered yet
+      const reachesBeforeWindow = customDateRange.start
+        ? new Date(customDateRange.start) < new Date(windowStart)
+        : true; // no start bound → unbounded past
+      if (reachesBeforeWindow) {
+        return {
+          start: customDateRange.start
+            ? new Date(customDateRange.start + "T00:00:00").toISOString()
+            : EPOCH_ISO,
+          end: customDateRange.end
+            ? new Date(customDateRange.end + "T23:59:59.999").toISOString()
+            : null,
+        };
+      }
+    }
+    return null; // window / today / week / month / in-window custom → client-side only
+  }, [dateFilter, customDateRange, windowStart]);
+
+  useEffect(() => {
+    if (!requiredRange) {
+      setOlderGroups(null);
+      setOlderRange(null);
+      setRangeError("");
+      return;
+    }
+    if (olderRange && olderRange.start === requiredRange.start && olderRange.end === requiredRange.end) {
+      return; // already loaded
+    }
+    startRangeTransition(async () => {
+      const res = await fetchTransactionsRangeAction(requiredRange.start, requiredRange.end);
+      if (res.error) {
+        setRangeError(res.error);
+      } else {
+        setRangeError("");
+        setOlderGroups(res.transactions);
+        setOlderRange(requiredRange);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requiredRange]);
+
+  // After a mutation (add/edit/delete → router.refresh() updates the prop),
+  // re-fetch the expanded range so it doesn't go stale.
+  useEffect(() => {
+    if (!olderRange) return;
+    const range = olderRange;
+    startRangeTransition(async () => {
+      const res = await fetchTransactionsRangeAction(range.start, range.end);
+      if (!res.error) setOlderGroups(res.transactions);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions]);
+
+  // The dataset all filters operate on
+  const sourceTransactions = olderGroups ?? transactions;
 
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -51,13 +128,13 @@ export default function TransactionsView({ transactions, currency, categories = 
     });
   };
 
-  // Active filter count for badge
+  // Active filter count for badge ("window" is the default date state)
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (typeFilter !== "all") count++;
     if (categoryFilter !== "all") count++;
     if (accountFilter !== "all") count++;
-    if (dateFilter !== "all") count++;
+    if (dateFilter !== "window") count++;
     return count;
   }, [typeFilter, categoryFilter, accountFilter, dateFilter]);
 
@@ -65,7 +142,7 @@ export default function TransactionsView({ transactions, currency, categories = 
     setTypeFilter("all");
     setCategoryFilter("all");
     setAccountFilter("all");
-    setDateFilter("all");
+    setDateFilter("window");
     setCustomDateRange({ start: "", end: "" });
   };
 
@@ -109,13 +186,13 @@ export default function TransactionsView({ transactions, currency, categories = 
     categories.forEach(cat => {
       if (cat.name) cats.add(cat.name);
     });
-    transactions.forEach(group => {
+    sourceTransactions.forEach(group => {
       group.transactions.forEach((txn: any) => {
         if (txn.category) cats.add(txn.category);
       });
     });
     return Array.from(cats).sort();
-  }, [transactions, categories]);
+  }, [sourceTransactions, categories]);
 
   const accountGroups = useMemo(() => {
     const normalAccs = new Set<string>();
@@ -130,7 +207,7 @@ export default function TransactionsView({ transactions, currency, categories = 
       }
     });
 
-    transactions.forEach(group => {
+    sourceTransactions.forEach(group => {
       group.transactions.forEach((txn: any) => {
         if (txn.account) {
           if (!contactAccs.has(txn.account) && !normalAccs.has(txn.account)) {
@@ -153,13 +230,13 @@ export default function TransactionsView({ transactions, currency, categories = 
       normal: Array.from(normalAccs).sort(),
       contact: Array.from(contactAccs).sort()
     };
-  }, [transactions, accounts]);
+  }, [sourceTransactions, accounts]);
 
   // Apply all filters to produce filtered transaction groups
   const filteredTransactions = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
 
-    return transactions
+    return sourceTransactions
       .map(group => {
         const filteredTxns = group.transactions.filter((txn: any) => {
           // Type filter
@@ -182,8 +259,9 @@ export default function TransactionsView({ transactions, currency, categories = 
           // Account filter
           if (accountFilter !== "all" && txn.account !== accountFilter && txn.transfer_account_name !== accountFilter) return false;
 
-          // Date filter
-          if (dateFilter !== "all") {
+          // Date filter ("window" and "all" show the whole loaded dataset —
+          // the dataset itself already matches those ranges)
+          if (dateFilter !== "all" && dateFilter !== "window") {
             const txnDateRaw = txn.date ? new Date(txn.date) : null;
             if (!txnDateRaw) return false;
 
@@ -259,7 +337,7 @@ export default function TransactionsView({ transactions, currency, categories = 
         return { ...group, transactions: finalTxns };
       })
       .filter(Boolean);
-  }, [transactions, typeFilter, searchQuery, categoryFilter, accountFilter, dateFilter, customDateRange]);
+  }, [sourceTransactions, typeFilter, searchQuery, categoryFilter, accountFilter, dateFilter, customDateRange]);
 
   // CSV Export
   const handleExportCSV = () => {
@@ -383,10 +461,11 @@ export default function TransactionsView({ transactions, currency, categories = 
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value)}
           >
-            <option value="all">All Time</option>
+            <option value="window">Last 2 Months</option>
             <option value="today">Today</option>
             <option value="week">This Week</option>
             <option value="month">This Month</option>
+            <option value="all">All Time</option>
             <option value="custom">Custom Range...</option>
           </select>
 
@@ -462,10 +541,10 @@ export default function TransactionsView({ transactions, currency, categories = 
             <button className={styles.chipRemove} onClick={() => setTypeFilter("all")}><X size={11} /></button>
           </span>
         )}
-        {dateFilter !== "all" && (
+        {dateFilter !== "window" && (
           <span className={styles.filterChip}>
-            {dateFilter === "today" ? "Today" : dateFilter === "week" ? "This Week" : dateFilter === "month" ? "This Month" : "Custom"}
-            <button className={styles.chipRemove} onClick={() => { setDateFilter("all"); setCustomDateRange({ start: "", end: "" }); }}><X size={11} /></button>
+            {dateFilter === "today" ? "Today" : dateFilter === "week" ? "This Week" : dateFilter === "month" ? "This Month" : dateFilter === "all" ? "All Time" : "Custom"}
+            <button className={styles.chipRemove} onClick={() => { setDateFilter("window"); setCustomDateRange({ start: "", end: "" }); }}><X size={11} /></button>
           </span>
         )}
         {categoryFilter !== "all" && (
@@ -518,7 +597,7 @@ export default function TransactionsView({ transactions, currency, categories = 
               <div className={styles.sheetSection}>
                 <div className={styles.sheetSectionLabel}>Date Range</div>
                 <div className={styles.sheetSegmented} style={{ flexWrap: "wrap" }}>
-                  {[{v:"all",l:"All Time"},{v:"today",l:"Today"},{v:"week",l:"This Week"},{v:"month",l:"This Month"},{v:"custom",l:"Custom"}].map(({v,l}) => (
+                  {[{v:"window",l:"Last 2 Months"},{v:"today",l:"Today"},{v:"week",l:"This Week"},{v:"month",l:"This Month"},{v:"all",l:"All Time"},{v:"custom",l:"Custom"}].map(({v,l}) => (
                     <button
                       key={v}
                       className={`${styles.sheetToggleBtn} ${dateFilter === v ? styles.sheetToggleActive : ""}`}
@@ -573,11 +652,24 @@ export default function TransactionsView({ transactions, currency, categories = 
       )}
 
       {/* DETAILED LIST VIEW */}
-      <div className={styles.transactionsContainer}>
+      <div className={styles.transactionsContainer} style={{ opacity: isLoadingRange ? 0.6 : 1 }}>
+        {rangeError && (
+          <div style={{ padding: "12px 24px", color: "var(--danger)", fontSize: "13px" }}>{rangeError}</div>
+        )}
         {filteredTransactions.length === 0 ? (
           <div style={{ padding: "48px 24px", textAlign: "center", color: "var(--text-tertiary)" }}>
-            <p style={{ fontSize: "16px", fontWeight: 500, marginBottom: "8px" }}>No transactions found</p>
-            <p style={{ fontSize: "14px" }}>Try adjusting your filters or search query.</p>
+            {isLoadingRange ? (
+              <p style={{ fontSize: "16px", fontWeight: 500 }}>Loading transactions…</p>
+            ) : (
+              <>
+                <p style={{ fontSize: "16px", fontWeight: 500, marginBottom: "8px" }}>No transactions found</p>
+                <p style={{ fontSize: "14px" }}>
+                  {dateFilter === "window"
+                    ? "Nothing in the last 2 months. Older entries are available under the date filter (“All Time” or a custom range)."
+                    : "Try adjusting your filters or search query."}
+                </p>
+              </>
+            )}
           </div>
         ) : (
           filteredTransactions.map((group: any) => (

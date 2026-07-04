@@ -129,6 +129,132 @@ function enrichCCAccount(acc: any, allTransactions: any[] = []) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────
+// TRANSACTION FETCH WINDOW + SHARED SHAPING HELPERS
+// ─────────────────────────────────────────────────────────────
+
+const TXN_SELECT = `
+  *,
+  categories(name, color, icon),
+  accounts!transactions_account_id_fkey(name, type),
+  transfer_account:accounts!transactions_transfer_to_account_id_fkey(name, type)
+`;
+
+/**
+ * Default fetch window: from the 1st of the PREVIOUS month.
+ * This covers everything the dashboard computes — current-month income/expense,
+ * today's spend, the spending donut (all current-month), and the CC billing
+ * cycle (statement cycles look back at most ~32 days) — while keeping the
+ * payload bounded as transaction history grows. The /transactions page shows
+ * the same window by default; older ranges are fetched on demand via
+ * fetchTransactionsRangeAction when the user widens the date filter.
+ */
+export function getDefaultTxnWindowStart(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+}
+
+function mapTxnRow(txn: any) {
+  return {
+    id: txn.id,
+    date: txn.date,
+    merchant: txn.note || (txn.categories ? txn.categories.name : 'Transaction'),
+    note: txn.note || '',
+    category: txn.categories ? txn.categories.name : 'General',
+    amount: Number(txn.amount),
+    type: txn.type,
+    account: txn.accounts ? txn.accounts.name : 'Account',
+    account_id: txn.account_id,
+    category_id: txn.category_id,
+    transfer_to_account_id: txn.transfer_to_account_id,
+    transfer_account_name: txn.transfer_account ? (txn.transfer_account as any).name : null,
+    transfer_account_type: txn.transfer_account ? (txn.transfer_account as any).type : null,
+    icon: txn.categories?.icon,
+    color: txn.categories?.color,
+    split_group_id: txn.split_group_id,
+    original_synced_name: txn.original_synced_name
+  };
+}
+
+/** Groups raw transaction rows (date-descending) into the UI's day-group shape. */
+function groupTransactionsByDate(transactionsRaw: any[]): any[] {
+  const groupedTxns: any[] = [];
+  if (!transactionsRaw || transactionsRaw.length === 0) return groupedTxns;
+
+  const groupsMap = new Map();
+  transactionsRaw.forEach(txn => {
+    // Format the postgres date to a human readable label (e.g. "Today, April 9" or "April 8")
+    const dateObj = new Date(txn.date);
+    const dayLabel = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+
+    if (!groupsMap.has(dayLabel)) {
+      groupsMap.set(dayLabel, {
+        id: `group_${dayLabel}`,
+        dateLabel: dayLabel,
+        dailyIncome: 0,
+        dailyExpense: 0,
+        transactions: []
+      });
+    }
+
+    const group = groupsMap.get(dayLabel);
+    if (txn.type === 'income') group.dailyIncome += Number(txn.amount);
+    if (txn.type === 'expense') group.dailyExpense += Number(txn.amount);
+
+    group.transactions.push(mapTxnRow(txn));
+  });
+
+  groupsMap.forEach(value => groupedTxns.push(value));
+  return groupedTxns;
+}
+
+/**
+ * Fetches the user's transactions for an arbitrary date range, in the same
+ * day-grouped shape as getDashboardData().recentTransactions. Used by the
+ * /transactions page when the user widens the date filter beyond the default
+ * window.
+ */
+export async function getTransactionsRange(startISO: string, endISO?: string) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  if (supabaseUrl.includes("placeholder")) return [];
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  let query = supabase
+    .from("transactions")
+    .select(TXN_SELECT)
+    .eq("user_id", user.id)
+    .gte("date", startISO)
+    .order("date", { ascending: false });
+
+  if (endISO) query = query.lte("date", endISO);
+
+  const { data: txns, error } = await query;
+  if (error) throw new Error(error.message);
+
+  return groupTransactionsByDate(txns || []);
+}
+
+/** Cheap existence check — used to distinguish "no transactions in the window"
+ *  from "user has never recorded anything". */
+export async function hasAnyTransactions(): Promise<boolean> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  if (supabaseUrl.includes("placeholder")) return false;
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  const { count } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  return (count || 0) > 0;
+}
+
 export async function getDashboardData() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const isPlaceholder = supabaseUrl.includes("placeholder");
@@ -161,13 +287,12 @@ export async function getDashboardData() {
         .order("created_at", { ascending: true }),
       supabase
         .from("transactions")
-        .select(`
-          *,
-          categories(name, color, icon),
-          accounts!transactions_account_id_fkey(name, type),
-          transfer_account:accounts!transactions_transfer_to_account_id_fkey(name, type)
-        `)
+        .select(TXN_SELECT)
         .eq("user_id", user.id)
+        // Bounded window (1st of previous month): covers every aggregate below
+        // — month income/expense, today's spend, spending donut, CC cycles —
+        // without shipping the user's entire history on every page load.
+        .gte("date", getDefaultTxnWindowStart())
         .order("date", { ascending: false }),
       supabase
         .from("savings_goals")
@@ -242,52 +367,7 @@ export async function getDashboardData() {
     const totalSavings = totalIncome - totalExpenses;
 
     // B. Group Transactions by Date (Building the 'recentTransactions' array shape)
-    const groupedTxns: any[] = [];
-    if (transactionsRaw && transactionsRaw.length > 0) {
-      const groupsMap = new Map();
-
-      transactionsRaw.forEach(txn => {
-        // Format the postgres date to a human readable label (e.g. "Today, April 9" or "April 8")
-        const dateObj = new Date(txn.date);
-        const dayLabel = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-        
-        if (!groupsMap.has(dayLabel)) {
-          groupsMap.set(dayLabel, {
-            id: `group_${dayLabel}`,
-            dateLabel: dayLabel,
-            dailyIncome: 0,
-            dailyExpense: 0,
-            transactions: []
-          });
-        }
-
-        const group = groupsMap.get(dayLabel);
-        if (txn.type === 'income') group.dailyIncome += Number(txn.amount);
-        if (txn.type === 'expense') group.dailyExpense += Number(txn.amount);
-        
-        group.transactions.push({
-          id: txn.id,
-          date: txn.date,
-          merchant: txn.note || (txn.categories ? txn.categories.name : 'Transaction'),
-          note: txn.note || '',
-          category: txn.categories ? txn.categories.name : 'General',
-          amount: Number(txn.amount),
-          type: txn.type,
-          account: txn.accounts ? txn.accounts.name : 'Account',
-          account_id: txn.account_id,
-          category_id: txn.category_id,
-          transfer_to_account_id: txn.transfer_to_account_id,
-          transfer_account_name: txn.transfer_account ? (txn.transfer_account as any).name : null,
-          transfer_account_type: txn.transfer_account ? (txn.transfer_account as any).type : null,
-          icon: txn.categories?.icon,
-          color: txn.categories?.color,
-          split_group_id: txn.split_group_id,
-          original_synced_name: txn.original_synced_name
-        });
-      });
-
-      groupsMap.forEach(value => groupedTxns.push(value));
-    }
+    const groupedTxns = groupTransactionsByDate(transactionsRaw || []);
 
     // C. Re-map accounts — enrich CC accounts with computed fields
     const formattedAccounts = accountsRaw.map(acc => enrichCCAccount({
