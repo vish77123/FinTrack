@@ -214,6 +214,16 @@ export async function retrySmsParseAction(smsId: string) {
   );
 
   if (!parsed) {
+    // Distinguish "no AI key configured" (a settings problem the user can fix
+    // right now) from a genuine parse failure.
+    const geminiConfigured = Boolean(
+      (settings?.gemini_api_keys || []).filter(Boolean).length > 0 ||
+      process.env.GEMINI_API_KEY_1 || process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_2
+    );
+    const nvidiaConfigured = Boolean(settings?.nvidia_api_key || process.env.NVIDIA_API_KEY);
+    if (llmEnabled && !geminiConfigured && !nvidiaConfigured) {
+      return { error: "Parsing failed: AI parsing is on but no Gemini or NVIDIA API key is configured (Settings → AI Provider)." };
+    }
     return { error: "Parsing failed again — LLM may still be unavailable" };
   }
 
