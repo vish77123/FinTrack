@@ -365,6 +365,9 @@ export async function syncGmailAction() {
       llmResultsMap = nvidia.results;
       if (nvidia.providerFailed) {
         llmWarning = `AI parsing unavailable (${nvidia.failureReason || "unknown"}) — ${emailsForLLM.length} email(s) left unparsed. They will be retried on the next sync.`;
+      } else if (nvidia.failedCount) {
+        // Some chunks failed but others parsed — partial progress, not an outage.
+        llmWarning = `AI parsing partially failed (${nvidia.failureReason || "unknown"}) — ${nvidia.failedCount} email(s) left unparsed. They will be retried on the next sync.`;
       }
     } else {
       console.log(`[SYNC] User preferred primary provider: Google Gemini`);
@@ -379,7 +382,11 @@ export async function syncGmailAction() {
         llmResultsMap = nvidia.results;
         if (nvidia.providerFailed) {
           llmWarning = `AI parsing unavailable (Gemini: ${gemini.failureReason || "unknown"}; NVIDIA: ${nvidia.failureReason || "unknown"}) — ${emailsForLLM.length} email(s) left unparsed. They will be retried on the next sync.`;
+        } else if (nvidia.failedCount) {
+          llmWarning = `AI parsing partially failed (${nvidia.failureReason || "unknown"}) — ${nvidia.failedCount} email(s) left unparsed. They will be retried on the next sync.`;
         }
+      } else if (gemini.failedCount) {
+        llmWarning = `AI parsing partially failed (${gemini.failureReason || "unknown"}) — ${gemini.failedCount} email(s) left unparsed. They will be retried on the next sync.`;
       }
     }
 

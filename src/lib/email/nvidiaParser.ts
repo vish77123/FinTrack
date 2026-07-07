@@ -3,6 +3,12 @@
  * Uses the NVIDIA build.nvidia.com OpenAI-compatible API.
  * Default model: google/gemma-3n-e4b-it
  * Requires NVIDIA_API_KEY in .env.local
+ *
+ * Emails are processed in small chunks: with max_tokens capped, a single
+ * request covering a large backlog (e.g. 50+ emails) gets its JSON response
+ * truncated mid-array and the whole batch fails as unparseable. Each parsed
+ * item costs roughly 60–120 output tokens, so CHUNK_SIZE × ~120 must stay
+ * comfortably under MAX_OUTPUT_TOKENS.
  */
 
 export interface LLMParsedTransaction {
@@ -37,50 +43,46 @@ function sanitize(text: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════
-// BATCH NVIDIA PARSER
+// CHUNKED NVIDIA PARSER
 // Uses the OpenAI-compatible /chat/completions endpoint
 // ═══════════════════════════════════════════════════════════
 
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+const CHUNK_SIZE = 10;
+const MAX_OUTPUT_TOKENS = 2048;
+// Stop hammering a broken/unreachable API after this many chunk failures in a row
+const MAX_CONSECUTIVE_FAILURES = 2;
 
 export interface ParserOutcome {
   results: Map<string, LLMParsedTransaction>;
   /**
-   * true when the provider itself failed (no key configured, API error,
-   * unparseable response) — distinct from a successful call that found no
-   * transactions in the input.
+   * true when the provider itself failed for EVERY chunk (no key configured,
+   * API errors, unparseable responses) — distinct from a successful call that
+   * found no transactions in the input.
    */
   providerFailed: boolean;
   failureReason?: string;
+  /** Emails that were in failed (or skipped-after-abort) chunks. */
+  failedCount?: number;
 }
 
-export async function parseBatchWithNvidia(
-  emails: { id: string; text: string }[],
-  config?: any
-): Promise<ParserOutcome> {
-  const results = new Map<string, LLMParsedTransaction>();
-  if (emails.length === 0) return { results, providerFailed: false };
+type ChunkResult =
+  | { ok: true; items: any[] }
+  | { ok: false; failureReason: string };
 
-  const apiKey = config?.nvidiaKey || process.env.NVIDIA_API_KEY;
-  if (!apiKey) {
-    console.warn("[NVIDIA] No API key configured. Skipping NVIDIA fallback.");
-    return { results, providerFailed: true, failureReason: "no_nvidia_key" };
-  }
-
-  const targetModel = config?.nvidiaModel || "google/gemma-3n-e4b-it";
-
-  const emailsBlock = emails.map((email, idx) => `
+async function parseNvidiaChunk(
+  chunk: { id: string; text: string }[],
+  apiKey: string,
+  targetModel: string,
+  categoriesContext: string
+): Promise<ChunkResult> {
+  const emailsBlock = chunk.map((email, idx) => `
 --- EMAIL ${idx + 1} (ID: ${email.id}) ---
 ${sanitize(email.text)}
 `).join("\n");
 
-  const existingCategories = config?.existingCategories || [];
-  const categoriesContext = existingCategories.length > 0 
-    ? `\nExisting User Categories:\n${JSON.stringify(existingCategories, null, 2)}\n`
-    : `\nThe user has no existing categories.\n`;
-
   const prompt = `You are an expert financial extraction engine.
-Parse ALL of the following ${emails.length} bank alert emails and return a JSON ARRAY of results.
+Parse ALL of the following ${chunk.length} bank alert emails and return a JSON ARRAY of results.
 
 For EACH email, extract:
 1. "emailId" — the ID provided in the header (copy it exactly)
@@ -100,8 +102,6 @@ ${emailsBlock}
 `;
 
   try {
-    console.log(`[NVIDIA] Sending batch of ${emails.length} emails to NVIDIA NIM (${targetModel})...`);
-
     const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
@@ -115,29 +115,29 @@ ${emailsBlock}
           { role: "user", content: prompt },
         ],
         temperature: 0.1,
-        max_tokens: 2048,
+        max_tokens: MAX_OUTPUT_TOKENS,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
       console.warn(`[NVIDIA] API failed (${response.status}): ${errText.slice(0, 300)}`);
-      return { results, providerFailed: true, failureReason: `nvidia_http_${response.status}` };
+      return { ok: false, failureReason: `nvidia_http_${response.status}` };
     }
 
     const data = await response.json();
-    let outputString = data.choices?.[0]?.message?.content || "";
+    const outputString = data.choices?.[0]?.message?.content || "";
 
     console.log(`[NVIDIA] Raw response: ${outputString.slice(0, 600)}...`);
 
     let parsedArray: any[] | null = null;
     try {
       parsedArray = JSON.parse(outputString);
-    } catch (e1: any) {
+    } catch {
       const cleaned = outputString.replace(/```json/gi, "").replace(/```/g, "").trim();
       try {
         parsedArray = JSON.parse(cleaned);
-      } catch (e2: any) {
+      } catch {
         const match = cleaned.match(/\[[\s\S]*\]/);
         if (match) {
           try {
@@ -154,12 +154,71 @@ ${emailsBlock}
     if (!Array.isArray(parsedArray)) {
       // Model produced no usable JSON at all — a provider failure, not
       // "these emails contain no transactions".
-      return { results, providerFailed: true, failureReason: "nvidia_unparseable_response" };
+      return { ok: false, failureReason: "nvidia_unparseable_response" };
     }
 
-    console.log(`[NVIDIA] Parsed ${parsedArray.length} items:`);
+    return { ok: true, items: parsedArray };
+  } catch (err) {
+    console.error("[NVIDIA] Chunk request failed:", err);
+    return { ok: false, failureReason: "nvidia_exception" };
+  }
+}
 
-    for (const item of parsedArray) {
+export async function parseBatchWithNvidia(
+  emails: { id: string; text: string }[],
+  config?: any
+): Promise<ParserOutcome> {
+  const results = new Map<string, LLMParsedTransaction>();
+  if (emails.length === 0) return { results, providerFailed: false };
+
+  const apiKey = config?.nvidiaKey || process.env.NVIDIA_API_KEY;
+  if (!apiKey) {
+    console.warn("[NVIDIA] No API key configured. Skipping NVIDIA fallback.");
+    return { results, providerFailed: true, failureReason: "no_nvidia_key", failedCount: emails.length };
+  }
+
+  const targetModel = config?.nvidiaModel || "google/gemma-3n-e4b-it";
+
+  const existingCategories = config?.existingCategories || [];
+  const categoriesContext = existingCategories.length > 0
+    ? `\nExisting User Categories:\n${JSON.stringify(existingCategories, null, 2)}\n`
+    : `\nThe user has no existing categories.\n`;
+
+  const chunks: { id: string; text: string }[][] = [];
+  for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
+    chunks.push(emails.slice(i, i + CHUNK_SIZE));
+  }
+
+  console.log(`[NVIDIA] Sending ${emails.length} emails to NVIDIA NIM (${targetModel}) in ${chunks.length} chunk(s) of ≤${CHUNK_SIZE}...`);
+
+  let chunksSucceeded = 0;
+  let failedCount = 0;
+  let firstFailureReason: string | undefined;
+  let consecutiveFailures = 0;
+
+  for (let c = 0; c < chunks.length; c++) {
+    const chunk = chunks[c];
+    const outcome = await parseNvidiaChunk(chunk, apiKey, targetModel, categoriesContext);
+
+    if (!outcome.ok) {
+      failedCount += chunk.length;
+      firstFailureReason = firstFailureReason || outcome.failureReason;
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES && c < chunks.length - 1) {
+        // API is likely down/misconfigured — count the rest as failed instead
+        // of hammering it once per remaining chunk.
+        const remaining = chunks.slice(c + 1).reduce((sum, ch) => sum + ch.length, 0);
+        failedCount += remaining;
+        console.warn(`[NVIDIA] ${consecutiveFailures} consecutive chunk failures — skipping ${remaining} remaining email(s) this run.`);
+        break;
+      }
+      continue;
+    }
+
+    consecutiveFailures = 0;
+    chunksSucceeded++;
+
+    for (const item of outcome.items) {
       console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
 
       if (!item.emailId || !item.amount || Number(item.amount) <= 0) continue;
@@ -175,13 +234,14 @@ ${emailsBlock}
         newCategory: item.newCategory || undefined,
       });
     }
-
-    console.log(`[NVIDIA ✓] ${results.size}/${emails.length} transactions extracted via NVIDIA NIM`);
-
-  } catch (err) {
-    console.error("[NVIDIA] Parsing failed:", err);
-    return { results, providerFailed: true, failureReason: "nvidia_exception" };
   }
 
-  return { results, providerFailed: false };
+  console.log(`[NVIDIA ✓] ${results.size}/${emails.length} transactions extracted via NVIDIA NIM (${chunksSucceeded}/${chunks.length} chunks ok)`);
+
+  return {
+    results,
+    providerFailed: chunksSucceeded === 0,
+    failureReason: firstFailureReason,
+    ...(failedCount > 0 ? { failedCount } : {}),
+  };
 }

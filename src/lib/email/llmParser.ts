@@ -219,13 +219,15 @@ function sanitize(text: string): string {
 export interface ParserOutcome {
   results: Map<string, LLMParsedTransaction>;
   /**
-   * true when the provider itself failed (no keys configured, rate limits
-   * exhausted, API error, unparseable response) — distinct from a successful
-   * call that found no transactions in the input. Callers should only fail
-   * over to another provider when this is true.
+   * true when the provider itself failed for EVERY chunk (no keys configured,
+   * rate limits exhausted, API error, unparseable response) — distinct from a
+   * successful call that found no transactions in the input. Callers should
+   * only fail over to another provider when this is true.
    */
   providerFailed: boolean;
   failureReason?: string;
+  /** Emails that were in failed (or skipped-after-abort) chunks. */
+  failedCount?: number;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -246,32 +248,33 @@ interface EmailForParsing {
   text: string;
 }
 
-export async function parseBatchWithLLM(
-  emails: EmailForParsing[],
-  config?: any
-): Promise<ParserOutcome> {
-  const results = new Map<string, LLMParsedTransaction>();
-  if (emails.length === 0) return { results, providerFailed: false };
+// Emails are processed in chunks: one giant request for a large backlog blows
+// past the model's output budget and the truncated JSON array fails to parse,
+// killing the whole batch. Gemini's output ceiling is generous, so chunks can
+// be larger than NVIDIA's — but each chunk costs one rate-limited request
+// (RPM_LIMIT applies), so don't make them too small either.
+const CHUNK_SIZE = 15;
+// Stop looping once the keys are clearly exhausted / the API is down
+const MAX_CONSECUTIVE_FAILURES = 2;
 
-  const activeKeys = getRequestKeys(config?.geminiKeys);
-  if (activeKeys.length === 0) {
-    return { results, providerFailed: true, failureReason: "no_gemini_keys" };
-  }
+type ChunkResult =
+  | { ok: true; items: any[] }
+  | { ok: false; failureReason: string };
 
-  // Build the prompt — same structure as the working FinTrackPro code
-  const emailsBlock = emails.map((email, idx) => `
+async function parseGeminiChunk(
+  chunk: EmailForParsing[],
+  activeKeys: ReturnType<typeof getRequestKeys>,
+  targetModel: string,
+  categoriesContext: string
+): Promise<ChunkResult> {
+  const emailsBlock = chunk.map((email, idx) => `
 --- EMAIL ${idx + 1} (ID: ${email.id}) ---
 ${sanitize(email.text)}
 `).join("\n");
 
-const existingCategories = config?.existingCategories || [];
-  const categoriesContext = existingCategories.length > 0 
-    ? `\nExisting User Categories:\n${JSON.stringify(existingCategories, null, 2)}\n`
-    : `\nThe user has no existing categories.\n`;
-
   const batchPrompt = `
 You are an expert financial extraction engine.
-Parse ALL of the following ${emails.length} bank alert emails and return a JSON ARRAY of results.
+Parse ALL of the following ${chunk.length} bank alert emails and return a JSON ARRAY of results.
 
 For EACH email, extract:
 1. "emailId" — the ID provided in the header (copy it exactly)
@@ -299,9 +302,6 @@ ${emailsBlock}
 `;
 
   try {
-    const targetModel = config?.geminiModel || "gemini-2.5-flash";
-    console.log(`[LLM] Sending batch of ${emails.length} emails to ${targetModel}...`);
-
     const outputString = await rateLimitedGenerate({
       model: targetModel,
       contents: batchPrompt,
@@ -341,7 +341,7 @@ ${emailsBlock}
     // null means the provider was unavailable (keys exhausted / API errors),
     // not that the emails contained no transactions.
     if (!outputString) {
-      return { results, providerFailed: true, failureReason: "gemini_unavailable" };
+      return { ok: false, failureReason: "gemini_unavailable" };
     }
 
     let parsedArray: any[] | null = null;
@@ -365,38 +365,96 @@ ${emailsBlock}
     }
 
     if (!Array.isArray(parsedArray)) {
-      return { results, providerFailed: true, failureReason: "gemini_unparseable_response" };
+      return { ok: false, failureReason: "gemini_unparseable_response" };
     }
 
-    {
-      console.log(`[LLM] Parsed ${parsedArray.length} items:`);
-
-      for (const item of parsedArray) {
-        console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
-
-        if (!item.emailId || !item.amount || Number(item.amount) <= 0) continue;
-
-        results.set(item.emailId, {
-          amount: Number(item.amount),
-          type: ["income", "expense", "cc_payment", "transfer"].includes(item.type) ? item.type : "expense",
-          merchant: item.merchant || (item.type === "cc_payment" ? "Credit Card Payment" : "Bank Transaction"),
-          date: item.date || new Date().toISOString().split("T")[0],
-          accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
-          confidence: 0.80,
-          categoryId: item.categoryId || undefined,
-          newCategory: item.newCategory || undefined,
-        });
-      }
-    }
-
-    console.log(`[LLM ✓] ${results.size}/${emails.length} transactions extracted`);
-
+    return { ok: true, items: parsedArray };
   } catch (err) {
-    console.error("[LLM] Batch parsing failed:", err);
-    return { results, providerFailed: true, failureReason: "gemini_exception" };
+    console.error("[LLM] Chunk request failed:", err);
+    return { ok: false, failureReason: "gemini_exception" };
+  }
+}
+
+export async function parseBatchWithLLM(
+  emails: EmailForParsing[],
+  config?: any
+): Promise<ParserOutcome> {
+  const results = new Map<string, LLMParsedTransaction>();
+  if (emails.length === 0) return { results, providerFailed: false };
+
+  const activeKeys = getRequestKeys(config?.geminiKeys);
+  if (activeKeys.length === 0) {
+    return { results, providerFailed: true, failureReason: "no_gemini_keys", failedCount: emails.length };
   }
 
-  return { results, providerFailed: false };
+  const existingCategories = config?.existingCategories || [];
+  const categoriesContext = existingCategories.length > 0
+    ? `\nExisting User Categories:\n${JSON.stringify(existingCategories, null, 2)}\n`
+    : `\nThe user has no existing categories.\n`;
+
+  const targetModel = config?.geminiModel || "gemini-2.5-flash";
+
+  const chunks: EmailForParsing[][] = [];
+  for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
+    chunks.push(emails.slice(i, i + CHUNK_SIZE));
+  }
+
+  console.log(`[LLM] Sending ${emails.length} emails to ${targetModel} in ${chunks.length} chunk(s) of ≤${CHUNK_SIZE}...`);
+
+  let chunksSucceeded = 0;
+  let failedCount = 0;
+  let firstFailureReason: string | undefined;
+  let consecutiveFailures = 0;
+
+  for (let c = 0; c < chunks.length; c++) {
+    const chunk = chunks[c];
+    const outcome = await parseGeminiChunk(chunk, activeKeys, targetModel, categoriesContext);
+
+    if (!outcome.ok) {
+      failedCount += chunk.length;
+      firstFailureReason = firstFailureReason || outcome.failureReason;
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES && c < chunks.length - 1) {
+        // Keys exhausted or API down — count the rest as failed instead of
+        // burning a rate-limited request per remaining chunk.
+        const remaining = chunks.slice(c + 1).reduce((sum, ch) => sum + ch.length, 0);
+        failedCount += remaining;
+        console.warn(`[LLM] ${consecutiveFailures} consecutive chunk failures — skipping ${remaining} remaining email(s) this run.`);
+        break;
+      }
+      continue;
+    }
+
+    consecutiveFailures = 0;
+    chunksSucceeded++;
+
+    console.log(`[LLM] Parsed ${outcome.items.length} items:`);
+    for (const item of outcome.items) {
+      console.log(`  [${item.emailId}] amount=${item.amount} type=${item.type} merchant=${item.merchant} date=${item.date}`);
+
+      if (!item.emailId || !item.amount || Number(item.amount) <= 0) continue;
+
+      results.set(item.emailId, {
+        amount: Number(item.amount),
+        type: ["income", "expense", "cc_payment", "transfer"].includes(item.type) ? item.type : "expense",
+        merchant: item.merchant || (item.type === "cc_payment" ? "Credit Card Payment" : "Bank Transaction"),
+        date: item.date || new Date().toISOString().split("T")[0],
+        accountLast4: item.accountLast4 ? String(item.accountLast4).slice(-4) : undefined,
+        confidence: 0.80,
+        categoryId: item.categoryId || undefined,
+        newCategory: item.newCategory || undefined,
+      });
+    }
+  }
+
+  console.log(`[LLM ✓] ${results.size}/${emails.length} transactions extracted (${chunksSucceeded}/${chunks.length} chunks ok)`);
+
+  return {
+    results,
+    providerFailed: chunksSucceeded === 0,
+    failureReason: firstFailureReason,
+    ...(failedCount > 0 ? { failedCount } : {}),
+  };
 }
 
 /**
