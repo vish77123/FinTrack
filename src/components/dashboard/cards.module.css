@@ -605,43 +605,6 @@
   border-color: var(--accent);
 }
 
-/* ── Owed-to-you strip ── */
-
-.owedStrip {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 14px;
-  margin-bottom: 20px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-}
-
-.owedLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.6875rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-tertiary);
-  margin-right: 4px;
-}
-
-.owedChip {
-  padding: 4px 12px;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--success);
-  background: var(--success-light);
-  border-radius: var(--radius-pill);
-  font-variant-numeric: tabular-nums;
-}
-
 /* ── Payment-due banner on a card ── */
 
 .dueBanner {

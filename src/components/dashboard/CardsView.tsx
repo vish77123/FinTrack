@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CalendarClock, ChevronRight, FileUp, Plus, Users } from "lucide-react";
-import type { ContactOption, CreditCardWithStatements } from "@/lib/data/cards";
+import { CalendarClock, ChevronRight, FileUp, Plus } from "lucide-react";
+import type { CreditCardWithStatements } from "@/lib/data/cards";
 import { StatementUploadModal } from "./StatementUploadModal";
 import styles from "./cards.module.css";
 
@@ -84,13 +84,11 @@ function daysUntil(d: string): number {
 
 interface CardsViewProps {
   cards: CreditCardWithStatements[];
-  contacts?: ContactOption[];
   loadError?: string | null;
 }
 
-export function CardsView({ cards, contacts = [], loadError }: CardsViewProps) {
+export function CardsView({ cards, loadError }: CardsViewProps) {
   const [uploadCard, setUploadCard] = useState<CreditCardWithStatements | null>(null);
-  const owedContacts = contacts.filter((c) => (c.balance || 0) > 0.01);
 
   return (
     <div className={styles.page}>
@@ -104,17 +102,6 @@ export function CardsView({ cards, contacts = [], loadError }: CardsViewProps) {
       </header>
 
       {loadError && <div className={styles.errorBanner}>{loadError}</div>}
-
-      {owedContacts.length > 0 && (
-        <div className={styles.owedStrip}>
-          <span className={styles.owedLabel}><Users size={14} /> Owed to you</span>
-          {owedContacts.map((c) => (
-            <span key={c.id} className={styles.owedChip}>
-              {c.name} · {formatINR(c.balance || 0)}
-            </span>
-          ))}
-        </div>
-      )}
 
       {cards.length === 0 && !loadError && (
         <div className={styles.empty}>
