@@ -7,7 +7,8 @@
  */
 
 import { GoogleGenAI } from "@google/genai";
-import { buildStatementPrompt, extractJsonObject, finalizeStatement, maskLongNumbers } from "./prompt";
+import { buildStatementPrompt, extractJsonObject, finalizeStatement } from "./prompt";
+import { redactStatementText } from "./redact";
 import type { ParsedStatement, StatementParseOptions } from "./types";
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
@@ -29,7 +30,8 @@ export async function parseStatementWithGemini(
   if (keys.length === 0) return { error: "No Gemini API key configured." };
 
   const model = options.geminiModelId || DEFAULT_MODEL;
-  const prompt = buildStatementPrompt(maskLongNumbers(statementText));
+  // Defense in depth: the action redacts before calling, but never trust that
+  const prompt = buildStatementPrompt(redactStatementText(statementText).text);
 
   let lastError = "Gemini request failed.";
 

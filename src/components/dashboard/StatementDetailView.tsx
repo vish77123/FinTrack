@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Pencil, RefreshCw, Trash2, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Pencil, RefreshCw, RotateCcw, Trash2, Users } from "lucide-react";
 import type { CategoryOption, ContactOption, StatementDetailData, StatementLineDetail } from "@/lib/data/cards";
 import { BaseModal } from "@/components/ui/BaseModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -13,6 +13,7 @@ import ui from "@/components/ui/ui.module.css";
 import {
   deleteStatementAction,
   importLinesAction,
+  rematchStatementAction,
   resolveLineMatchAction,
   setLineIgnoredAction,
   setLineOwnerAction,
@@ -34,6 +35,15 @@ function formatDate(d: string): string {
 }
 
 type Filter = "all" | "new" | "ambiguous" | "matched" | "imported" | "ignored";
+
+// Interest, fees, and taxes on a card statement deserve a loud flag — paying
+// them is the #1 thing a finance tracker should surface
+const FEE_PATTERN =
+  /interest|fin(?:ance)?\s?charge|late\s?(?:payment\s?)?fee|over\s?limit|annual\s?fee|membership\s?fee|joining\s?fee|renewal\s?fee|processing\s?fee|\bgst\b|\bigst\b|\bcgst\b|\bsgst\b|service\s?tax/i;
+
+function isFeeLine(line: StatementLineDetail): boolean {
+  return line.direction === "debit" && FEE_PATTERN.test(line.merchant);
+}
 
 const STATUS_LABEL: Record<string, string> = {
   matched: "Matched",
@@ -85,6 +95,11 @@ export function StatementDetailView({ statement, lines, candidateTransactions, c
   const newLineIds = lines.filter((l) => l.match_status === "new").map((l) => l.id);
   const reconciledCount = counts.matched + counts.imported;
   const progress = counts.all > 0 ? (reconciledCount / counts.all) * 100 : 0;
+  const feeTotal = lines.filter(isFeeLine).reduce((sum, l) => sum + l.amount, 0);
+  const canRematch = lines.some(
+    (l) => l.matched_pending || l.match_status === "new" || l.match_status === "ambiguous"
+  );
+  const isEmailShell = lines.length === 0 && !loadError;
   const cardColor = getBankColor(statement.accountName, statement.accountColor);
 
   function act(fn: () => Promise<{ error?: string } | { success?: boolean; error?: string }>) {
@@ -140,6 +155,29 @@ export function StatementDetailView({ statement, lines, candidateTransactions, c
           </div>
         </div>
         <div className={styles.headerSide}>
+          {canRematch && (
+            <button
+              className={styles.syncBtn}
+              disabled={isPending}
+              title="Re-run matching for unresolved lines — picks up transactions approved (or discarded) since the upload"
+              onClick={() => {
+                setNotice("");
+                act(async () => {
+                  const result = await rematchStatementAction(statement.id);
+                  if ("rematched" in result && result.rematched !== undefined) {
+                    setNotice(
+                      result.rematched > 0
+                        ? `Re-matched ${result.rematched} line${result.rematched === 1 ? "" : "s"}.`
+                        : "Nothing new to match — all unresolved lines stay as they were."
+                    );
+                  }
+                  return result;
+                });
+              }}
+            >
+              <RotateCcw size={14} /> Re-match
+            </button>
+          )}
           {statement.isLatest && statement.total_due !== null && (
             <button
               className={styles.syncBtn}
@@ -196,6 +234,19 @@ export function StatementDetailView({ statement, lines, candidateTransactions, c
         <div className={styles.bannerWarn}>
           The parsed lines don&apos;t add up to the statement&apos;s printed purchase total — some rows may be
           missing or misread. Double-check before importing.
+        </div>
+      )}
+      {feeTotal > 0 && (
+        <div className={styles.bannerWarn}>
+          <AlertTriangle size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+          This statement includes <strong>{formatINR(feeTotal)}</strong> in interest, fees, or taxes — the flagged
+          rows below. Paying interest on a credit card is worth avoiding.
+        </div>
+      )}
+      {isEmailShell && (
+        <div className={styles.bannerWarn}>
+          This entry was created from your bank&apos;s statement email — the dues and date above are real, but the
+          transactions aren&apos;t here yet. Upload the statement PDF from the Cards page to reconcile them.
         </div>
       )}
       {loadError && <div className={styles.bannerWarn}>{loadError}</div>}
@@ -365,7 +416,10 @@ function LineRow({ line, contacts, candidateTransactions, expanded, onToggleExpa
         </div>
 
         <div className={styles.mainCol}>
-          <span className={styles.merchantName} title={line.merchant}>{line.merchant}</span>
+          <span className={styles.merchantName} title={line.merchant}>
+            {line.merchant}
+            {isFeeLine(line) && <span className={styles.feeBadge}>Fee</span>}
+          </span>
           {subText && <span className={styles.lineSub} title={subText}>{subText}</span>}
         </div>
 
@@ -546,6 +600,7 @@ function EditLineModal({ line, categories, contacts, isPending, onClose, onSave 
         onChange={setCategoryId}
         label="Category (Optional)"
         transactionType={isDebit ? "expense" : "income"}
+        allowCreate={false}
       />
     </BaseModal>
   );

@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { applyBalanceUpdate, reverseBalanceUpdate } from "@/lib/balance";
 import { parseStatementText } from "@/lib/statements/orchestrator";
+import { redactStatementText } from "@/lib/statements/redact";
 import { matchStatementLines, MATCH_WINDOW_DAYS, type MatchableTransaction } from "@/lib/statements/match";
 
 const MAX_STATEMENT_TEXT_CHARS = 300_000;
@@ -64,13 +65,24 @@ export async function processStatementAction(input: { accountId: string; text: s
   if (account.type !== "credit_card") return { error: "Statements can only be uploaded for credit-card accounts." };
 
   // LLM provider config follows the user's email/SMS parsing settings
-  const { data: settings } = await supabase
-    .from("email_sync_settings")
-    .select("gemini_api_keys, gemini_model_id, nvidia_api_key, nvidia_model_id, selected_llm_provider")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const [{ data: settings }, { data: profile }] = await Promise.all([
+    supabase
+      .from("email_sync_settings")
+      .select("gemini_api_keys, gemini_model_id, nvidia_api_key, nvidia_model_id, selected_llm_provider")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
+  ]);
 
-  const parsed = await parseStatementText(text, {
+  // Redact PII once at the entry point: card/account numbers (last-4 kept),
+  // emails, phones, PAN/GSTIN/IFSC/Aadhaar, the user's name, and the header
+  // address block. Everything downstream — LLM calls AND the stored raw_text
+  // — only ever sees the redacted text.
+  const redacted = redactStatementText(text, { knownNames: [profile?.display_name] });
+  const redactedText = redacted.text;
+  console.log("[STMT] PII redaction:", JSON.stringify(redacted.counts));
+
+  const parsed = await parseStatementText(redactedText, {
     geminiKeys: settings?.gemini_api_keys ?? null,
     geminiModelId: settings?.gemini_model_id ?? null,
     nvidiaApiKey: settings?.nvidia_api_key ?? null,
@@ -132,6 +144,17 @@ export async function processStatementAction(input: { accountId: string; text: s
 
   const matches = matchStatementLines(lines, matchable, accountId);
 
+  // Merchant rules (same as email/SMS): rename, default category, and the
+  // remembered owner. The raw parsed name is kept in raw_text for rule
+  // learning and as original_synced_name on import.
+  const { data: merchantRules } = await supabase
+    .from("merchant_rules")
+    .select("synced_name, renamed_to, category_id, owner_account_id")
+    .eq("user_id", user.id);
+  const rulesByName = new Map(
+    (merchantRules || []).map((r) => [r.synced_name.trim().toLowerCase(), r])
+  );
+
   // Re-uploading the same statement replaces it (idempotent refresh). Any
   // previously imported transactions keep existing — their lines are simply
   // re-matched below.
@@ -160,7 +183,7 @@ export async function processStatementAction(input: { accountId: string; text: s
       checksum_ok: checksumOk,
       status: allResolved ? "reconciled" : "review",
       parsed_by: parsedBy,
-      raw_text: text,
+      raw_text: redactedText,
     })
     .select("id")
     .single();
@@ -170,19 +193,24 @@ export async function processStatementAction(input: { accountId: string; text: s
     return { error: "Failed to save the statement." };
   }
 
-  const lineRows = lines.map((line, i) => ({
-    user_id: user.id,
-    statement_id: statement.id,
-    date: line.date,
-    merchant: line.merchant,
-    amount: line.amount,
-    direction: line.direction,
-    raw_text: line.rawText,
-    match_status: matches[i].status,
-    matched_transaction_id: matches[i].matchedTransactionId,
-    matched_pending: matches[i].matchedPending,
-    match_candidates: matches[i].candidateIds.length > 0 ? matches[i].candidateIds : null,
-  }));
+  const lineRows = lines.map((line, i) => {
+    const rule = rulesByName.get(line.merchant.trim().toLowerCase());
+    return {
+      user_id: user.id,
+      statement_id: statement.id,
+      date: line.date,
+      merchant: rule?.renamed_to || line.merchant,
+      amount: line.amount,
+      direction: line.direction,
+      raw_text: line.rawText ?? line.merchant,
+      match_status: matches[i].status,
+      matched_transaction_id: matches[i].matchedTransactionId,
+      matched_pending: matches[i].matchedPending,
+      match_candidates: matches[i].candidateIds.length > 0 ? matches[i].candidateIds : null,
+      category_id: rule?.category_id ?? null,
+      owner_account_id: line.direction === "debit" ? rule?.owner_account_id ?? null : null,
+    };
+  });
 
   const { error: linesError } = await supabase.from("statement_lines").insert(lineRows);
   if (linesError) {
@@ -357,7 +385,7 @@ export async function setLineOwnerAction(lineId: string, ownerAccountId: string 
     .update({ owner_account_id: validated.data.ownerAccountId })
     .eq("id", validated.data.lineId)
     .eq("user_id", user.id)
-    .select("matched_transaction_id")
+    .select("matched_transaction_id, merchant, raw_text, direction")
     .single();
 
   if (error || !line) return { error: "Failed to update the owner." };
@@ -367,6 +395,34 @@ export async function setLineOwnerAction(lineId: string, ownerAccountId: string 
   if (line.matched_transaction_id) {
     const result = await applyOwnerToTransaction(supabase, user.id, line.matched_transaction_id, validated.data.ownerAccountId);
     if (result.error) return result;
+  }
+
+  // Owner memory: remember the choice on the merchant rule so future
+  // statement lines for this merchant default to the same owner. Read-then-
+  // write because renamed_to is NOT NULL and must not be clobbered.
+  const syncedName = (line.raw_text || line.merchant || "").trim();
+  if (line.direction === "debit" && syncedName) {
+    const { data: existingRule } = await supabase
+      .from("merchant_rules")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("synced_name", syncedName)
+      .maybeSingle();
+
+    if (existingRule) {
+      await supabase
+        .from("merchant_rules")
+        .update({ owner_account_id: validated.data.ownerAccountId })
+        .eq("id", existingRule.id)
+        .eq("user_id", user.id);
+    } else if (validated.data.ownerAccountId) {
+      await supabase.from("merchant_rules").insert({
+        user_id: user.id,
+        synced_name: syncedName,
+        renamed_to: line.merchant,
+        owner_account_id: validated.data.ownerAccountId,
+      });
+    }
   }
 
   revalidateCardViews();
@@ -503,7 +559,7 @@ export async function importLinesAction(input: { statementId: string; lineIds: s
     .eq("statement_id", statementId)
     .eq("user_id", user.id)
     .eq("match_status", "new")
-    .select("id, date, merchant, amount, direction, owner_account_id, category_id");
+    .select("id, date, merchant, amount, direction, owner_account_id, category_id, raw_text");
 
   if (claimError) return { error: "Failed to import the selected lines." };
   if (!claimed || claimed.length === 0) return { error: "No importable lines found (they may already be imported)." };
@@ -532,6 +588,8 @@ export async function importLinesAction(input: { statementId: string; lineIds: s
         owner_account_id: line.owner_account_id,
         category_id: line.category_id,
         transfer_to_account_id: transferTo,
+        // Raw parsed name, so "save as merchant rule" learning keeps working
+        original_synced_name: line.raw_text || line.merchant,
       })
       .select("id")
       .single();
@@ -586,6 +644,126 @@ export async function importLinesAction(input: { statementId: string; lineIds: s
 
   revalidateCardViews();
   return { success: true, imported };
+}
+
+// ═══════════════════════════════════════════════════════════
+// RE-RUN MATCHING
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Re-runs matching for a statement's unresolved lines: new, ambiguous, and
+ * "matched to a pending row" lines. Heals stale states — e.g. a pending
+ * transaction that has since been approved (line links to the real
+ * transaction) or discarded (line becomes new again). User decisions are
+ * never touched: imported, ignored, and real-transaction matches stay as-is.
+ */
+export async function rematchStatementAction(statementId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "You must be logged in." };
+
+  const validated = z.object({ statementId: z.string().uuid() }).safeParse({ statementId });
+  if (!validated.success) return { error: "Invalid statement." };
+
+  const { data: statement } = await supabase
+    .from("card_statements")
+    .select("id, account_id")
+    .eq("id", validated.data.statementId)
+    .eq("user_id", user.id)
+    .single();
+  if (!statement) return { error: "Statement not found." };
+
+  const { data: allLines } = await supabase
+    .from("statement_lines")
+    .select("id, date, merchant, amount, direction, match_status, matched_transaction_id, matched_pending")
+    .eq("statement_id", statement.id)
+    .eq("user_id", user.id);
+  if (!allLines || allLines.length === 0) return { success: true, rematched: 0 };
+
+  const rematchable = allLines.filter(
+    (l) => l.match_status === "new" || l.match_status === "ambiguous" || (l.match_status === "matched" && l.matched_pending)
+  );
+  if (rematchable.length === 0) return { success: true, rematched: 0 };
+
+  // Transactions already linked to other lines of this statement are taken
+  const linkedIds = new Set(allLines.map((l) => l.matched_transaction_id).filter(Boolean));
+
+  const lineDates = rematchable.map((l) => l.date).sort();
+  const windowStart = addDays(lineDates[0], -(MATCH_WINDOW_DAYS + 1));
+  const windowEnd = addDays(lineDates[lineDates.length - 1], MATCH_WINDOW_DAYS + 1);
+
+  const [{ data: txns }, { data: pendings }] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("id, amount, date, type, account_id, transfer_to_account_id")
+      .eq("user_id", user.id)
+      .or(`account_id.eq.${statement.account_id},transfer_to_account_id.eq.${statement.account_id}`)
+      .gte("date", windowStart)
+      .lte("date", windowEnd),
+    supabase
+      .from("pending_transactions")
+      .select("id, amount, date, type, account_id, transfer_to_account_id")
+      .eq("user_id", user.id)
+      .eq("status", "pending")
+      .or(`account_id.eq.${statement.account_id},transfer_to_account_id.eq.${statement.account_id}`)
+      .gte("date", windowStart)
+      .lte("date", windowEnd),
+  ]);
+
+  const matchable: MatchableTransaction[] = [
+    ...(txns ?? []).filter((t) => !linkedIds.has(t.id)).map((t) => ({ ...t, amount: Number(t.amount), pending: false })),
+    ...(pendings ?? []).map((t) => ({ ...t, amount: Number(t.amount), pending: true })),
+  ];
+
+  const parsedShape = rematchable.map((l) => ({
+    date: l.date,
+    merchant: l.merchant,
+    amount: Number(l.amount),
+    direction: l.direction as "debit" | "credit",
+    rawText: null,
+  }));
+  const matches = matchStatementLines(parsedShape, matchable, statement.account_id);
+
+  let changed = 0;
+  for (let i = 0; i < rematchable.length; i++) {
+    const line = rematchable[i];
+    const m = matches[i];
+    const unchanged =
+      m.status === line.match_status &&
+      (m.matchedTransactionId ?? null) === (line.matched_transaction_id ?? null) &&
+      m.matchedPending === line.matched_pending;
+    if (unchanged) continue;
+
+    const { error: updateError } = await supabase
+      .from("statement_lines")
+      .update({
+        match_status: m.status,
+        matched_transaction_id: m.matchedTransactionId,
+        matched_pending: m.matchedPending,
+        match_candidates: m.candidateIds.length > 0 ? m.candidateIds : null,
+      })
+      .eq("id", line.id)
+      .eq("user_id", user.id);
+    if (!updateError) changed++;
+  }
+
+  // Recompute statement status
+  const { data: unresolved } = await supabase
+    .from("statement_lines")
+    .select("id")
+    .eq("statement_id", statement.id)
+    .eq("user_id", user.id)
+    .in("match_status", ["new", "ambiguous"])
+    .limit(1);
+
+  await supabase
+    .from("card_statements")
+    .update({ status: !unresolved || unresolved.length === 0 ? "reconciled" : "review" })
+    .eq("id", statement.id)
+    .eq("user_id", user.id);
+
+  revalidateCardViews();
+  return { success: true, rematched: changed };
 }
 
 // ═══════════════════════════════════════════════════════════

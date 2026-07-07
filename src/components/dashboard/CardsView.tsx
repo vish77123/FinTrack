@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronRight, FileUp, Plus } from "lucide-react";
-import type { CreditCardWithStatements } from "@/lib/data/cards";
+import { CalendarClock, ChevronRight, FileUp, Plus, Users } from "lucide-react";
+import type { ContactOption, CreditCardWithStatements } from "@/lib/data/cards";
 import { StatementUploadModal } from "./StatementUploadModal";
 import styles from "./cards.module.css";
 
@@ -75,13 +75,22 @@ function ContactlessMark() {
   );
 }
 
+/** Days from today until the given date (negative = past). */
+function daysUntil(d: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((new Date(d).setHours(0, 0, 0, 0) - today.getTime()) / 86_400_000);
+}
+
 interface CardsViewProps {
   cards: CreditCardWithStatements[];
+  contacts?: ContactOption[];
   loadError?: string | null;
 }
 
-export function CardsView({ cards, loadError }: CardsViewProps) {
+export function CardsView({ cards, contacts = [], loadError }: CardsViewProps) {
   const [uploadCard, setUploadCard] = useState<CreditCardWithStatements | null>(null);
+  const owedContacts = contacts.filter((c) => (c.balance || 0) > 0.01);
 
   return (
     <div className={styles.page}>
@@ -95,6 +104,17 @@ export function CardsView({ cards, loadError }: CardsViewProps) {
       </header>
 
       {loadError && <div className={styles.errorBanner}>{loadError}</div>}
+
+      {owedContacts.length > 0 && (
+        <div className={styles.owedStrip}>
+          <span className={styles.owedLabel}><Users size={14} /> Owed to you</span>
+          {owedContacts.map((c) => (
+            <span key={c.id} className={styles.owedChip}>
+              {c.name} · {formatINR(c.balance || 0)}
+            </span>
+          ))}
+        </div>
+      )}
 
       {cards.length === 0 && !loadError && (
         <div className={styles.empty}>
@@ -111,6 +131,11 @@ export function CardsView({ cards, loadError }: CardsViewProps) {
             card.credit_limit && card.credit_limit > 0
               ? Math.min(100, Math.max(0, (card.outstanding_balance / card.credit_limit) * 100))
               : null;
+
+          // Payment reminder from the latest statement (shown up to 7 days past due)
+          const latest = card.statements[0];
+          const dueDays = latest?.due_date && latest.total_due !== null ? daysUntil(latest.due_date) : null;
+          const showDue = latest && dueDays !== null && dueDays >= -7;
 
           return (
             <section key={card.id} className={styles.cardBlock}>
@@ -173,6 +198,21 @@ export function CardsView({ cards, loadError }: CardsViewProps) {
                   </button>
                 </div>
 
+                {showDue && latest && (
+                  <div
+                    className={`${styles.dueBanner} ${
+                      dueDays! < 0 ? styles.dueOverdue : dueDays! <= 5 ? styles.dueSoon : ""
+                    }`}
+                  >
+                    <CalendarClock size={14} />
+                    {dueDays! < 0
+                      ? `${formatINR(latest.total_due!)} was due ${formatDay(latest.due_date!)}`
+                      : dueDays === 0
+                        ? `${formatINR(latest.total_due!)} due today`
+                        : `${formatINR(latest.total_due!)} due in ${dueDays} day${dueDays === 1 ? "" : "s"} · ${formatDay(latest.due_date!)}`}
+                  </div>
+                )}
+
                 {card.statements.length === 0 ? (
                   <button className={styles.emptyStatements} onClick={() => setUploadCard(card)}>
                     <Plus size={15} />
@@ -183,23 +223,29 @@ export function CardsView({ cards, loadError }: CardsViewProps) {
                     {card.statements.map((s) => {
                       const toReview = s.lineCounts.newLines + s.lineCounts.ambiguous;
                       const reconciled = s.status === "reconciled";
+                      // Shell from a statement email — no lines until the PDF is uploaded
+                      const awaitingUpload = s.lineCounts.total === 0;
                       return (
                         <li key={s.id}>
                           <Link href={`/cards/${s.id}`} className={styles.statementRow}>
                             <span
-                              className={`${styles.statusDot} ${reconciled ? styles.statusDotOk : styles.statusDotReview}`}
-                              title={reconciled ? "Reconciled" : "Needs review"}
+                              className={`${styles.statusDot} ${
+                                awaitingUpload ? styles.statusDotReview : reconciled ? styles.statusDotOk : styles.statusDotReview
+                              }`}
+                              title={awaitingUpload ? "Awaiting PDF upload" : reconciled ? "Reconciled" : "Needs review"}
                             />
                             <div className={styles.statementMain}>
                               <span className={styles.statementDate}>{formatMonth(s.statement_date)}</span>
                               <span className={styles.statementCounts}>
-                                {formatDay(s.statement_date)} · {s.lineCounts.matched + s.lineCounts.imported} of{" "}
-                                {s.lineCounts.total} reconciled
-                                {s.checksum_ok === false && " · totals mismatch"}
+                                {awaitingUpload
+                                  ? "From statement email — upload the PDF to reconcile"
+                                  : `${formatDay(s.statement_date)} · ${s.lineCounts.matched + s.lineCounts.imported} of ${s.lineCounts.total} reconciled${s.checksum_ok === false ? " · totals mismatch" : ""}`}
                               </span>
                             </div>
                             <div className={styles.statementSide}>
-                              {toReview > 0 ? (
+                              {awaitingUpload ? (
+                                <span className={styles.reviewBadge}>Upload PDF</span>
+                              ) : toReview > 0 ? (
                                 <span className={styles.reviewBadge}>{toReview} to review</span>
                               ) : (
                                 s.total_due !== null && (

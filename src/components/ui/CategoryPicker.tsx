@@ -21,11 +21,12 @@ interface CategoryPickerProps {
   label?: string;
   error?: string;
   transactionType?: string; // To know whether to create an income/expense category
+  allowCreate?: boolean; // Hide the "Add New" tile — pick from existing categories only
 }
 
 const presetColors = ["#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#5AC8FA", "#007AFF", "#5856D6", "#AF52DE", "#FF2D55", "#8E8E93"];
 
-export function CategoryPicker({ categories, value, onChange, label, error, transactionType = "expense" }: CategoryPickerProps) {
+export function CategoryPicker({ categories, value, onChange, label, error, transactionType = "expense", allowCreate = true }: CategoryPickerProps) {
   const router = useRouter();
   
   // Track newly created categories locally to prevent UI pop-in delays caused by Next.js cache.
@@ -210,17 +211,19 @@ export function CategoryPicker({ categories, value, onChange, label, error, tran
           })}
           
           {/* Add New Category Button */}
-          <div
-            className={`${styles.categoryChip} ${styles.addNewChip}`}
-            onClick={() => setIsCreating(true)}
-          >
-            <div className={styles.categoryIcon} style={{ background: "transparent", color: "var(--text-secondary)" }}>
-              <Plus size={20} />
+          {allowCreate && (
+            <div
+              className={`${styles.categoryChip} ${styles.addNewChip}`}
+              onClick={() => setIsCreating(true)}
+            >
+              <div className={styles.categoryIcon} style={{ background: "transparent", color: "var(--text-secondary)" }}>
+                <Plus size={20} />
+              </div>
+              <div className={styles.categoryName} style={{ color: "var(--text-secondary)" }}>
+                Add New
+              </div>
             </div>
-            <div className={styles.categoryName} style={{ color: "var(--text-secondary)" }}>
-              Add New
-            </div>
-          </div>
+          )}
         </div>
       )}
       

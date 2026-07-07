@@ -4,7 +4,8 @@
  * endpoint and defaults as the email/SMS Layer-3 parsers.
  */
 
-import { buildStatementPrompt, extractJsonObject, finalizeStatement, maskLongNumbers } from "./prompt";
+import { buildStatementPrompt, extractJsonObject, finalizeStatement } from "./prompt";
+import { redactStatementText } from "./redact";
 import type { ParsedStatement, StatementParseOptions } from "./types";
 
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
@@ -19,7 +20,8 @@ export async function parseStatementWithNvidia(
   if (!apiKey) return { error: "No NVIDIA API key configured." };
 
   const model = options.nvidiaModelId || DEFAULT_MODEL;
-  const prompt = buildStatementPrompt(maskLongNumbers(statementText));
+  // Defense in depth: the action redacts before calling, but never trust that
+  const prompt = buildStatementPrompt(redactStatementText(statementText).text);
 
   try {
     const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {

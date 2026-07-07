@@ -9,6 +9,7 @@ import { parseBatchWithNvidia } from "@/lib/email/nvidiaParser";
 // (a plain module, so importing it here does not create a cross-"use server"
 // dependency).
 import { applyBalanceUpdate } from "@/lib/balance";
+import { looksLikeStatementEmail, extractStatementSummary } from "@/lib/statements/emailShell";
 
 // ═══════════════════════════════════════════════════════════
 // BODY EXTRACTION — handles nested MIME structures
@@ -251,6 +252,8 @@ export async function syncGmailAction() {
   }
 
   const emailsToProcess: EmailData[] = [];
+  // Statement-notification emails, diverted into card_statements shells
+  const statementEmails: { fullText: string; emailDate: string }[] = [];
 
   // Single batch dedup query instead of N individual queries
   const allMsgIds = messages.map((m: any) => m.id as string);
@@ -328,12 +331,73 @@ export async function syncGmailAction() {
       console.log(`[SYNC] Subject: ${subject.slice(0, 60)}`);
       console.log(`[SYNC] Body (first 200): ${bodyText.slice(0, 200)}`);
 
+      // "Your statement is ready" emails aren't transactions — divert them
+      // into card_statements shells instead of the transaction parsers
+      if (looksLikeStatementEmail(subject)) {
+        console.log(`[SYNC] Statement notification detected: ${subject.slice(0, 60)}`);
+        statementEmails.push({ fullText, emailDate });
+        continue;
+      }
+
       let regexResult = null;
       if (regexEnabled) {
         regexResult = parseTransactionText(fullText, emailDate);
       }
 
       emailsToProcess.push({ msgId, from, subject, fullText, emailDate, regexResult });
+    }
+  }
+
+  // ── Statement shells from statement-notification emails ──────────
+  if (statementEmails.length > 0) {
+    const [{ data: ccAccounts }, { data: ccProfiles }] = await Promise.all([
+      supabase
+        .from("accounts")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("type", "credit_card")
+        .eq("is_archived", false),
+      supabase
+        .from("account_alert_profiles")
+        .select("account_id, account_last4")
+        .eq("user_id", user.id),
+    ]);
+    const last4ToAccount = new Map(
+      (ccProfiles || [])
+        .filter((p) => p.account_last4)
+        .map((p) => [p.account_last4!.replace(/\D/g, "").slice(-4), p.account_id])
+    );
+
+    for (const email of statementEmails) {
+      const summary = extractStatementSummary(email.fullText, email.emailDate);
+      if (!summary) continue;
+
+      // Resolve the card: alert-profile last4 first, single-card fallback
+      const accountId =
+        (summary.last4 && last4ToAccount.get(summary.last4)) ||
+        ((ccAccounts || []).length === 1 ? ccAccounts![0].id : null);
+      if (!accountId) {
+        console.log(`[SYNC] Statement email skipped — could not resolve card (last4: ${summary.last4})`);
+        continue;
+      }
+
+      // ignoreDuplicates: a real (PDF-parsed) statement for the same date
+      // must never be overwritten by an email shell
+      const { error: shellError } = await supabase.from("card_statements").upsert(
+        {
+          user_id: user.id,
+          account_id: accountId,
+          statement_date: summary.statementDate,
+          due_date: summary.dueDate,
+          total_due: summary.totalDue,
+          min_due: summary.minDue,
+          status: "review",
+          parsed_by: "email",
+        },
+        { onConflict: "user_id,account_id,statement_date", ignoreDuplicates: true }
+      );
+      if (shellError) console.error("[SYNC] Statement shell insert failed:", shellError.message);
+      else console.log(`[SYNC] Statement shell created: due ₹${summary.totalDue} on ${summary.dueDate}`);
     }
   }
 
@@ -604,6 +668,7 @@ export async function syncGmailAction() {
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
+  revalidatePath("/cards");
 
   console.log(`[SYNC] Done! ${newCount} new, ${skippedCount} skipped, ${messages.length} total`);
 

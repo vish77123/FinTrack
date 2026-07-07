@@ -41,6 +41,8 @@ export interface CreditCardWithStatements {
 export interface ContactOption {
   id: string;
   name: string;
+  /** Contact account balance (positive = they owe you). Cards page only. */
+  balance?: number;
 }
 
 export interface CardsData {
@@ -97,7 +99,7 @@ export async function getCardsData(): Promise<CardsData> {
       .order("statement_date", { ascending: false }),
     supabase
       .from("accounts")
-      .select("id, name")
+      .select("id, name, balance")
       .eq("user_id", user.id)
       .eq("type", "contact")
       .eq("is_archived", false)
@@ -156,7 +158,7 @@ export async function getCardsData(): Promise<CardsData> {
       statement_password: c.statement_password,
       statements: statementsByAccount.get(c.id) || [],
     })),
-    contacts: contacts || [],
+    contacts: (contacts || []).map((c) => ({ ...c, balance: Number(c.balance || 0) })),
     error: describeQueryError(cardsError) || describeQueryError(statementsError),
   };
 }

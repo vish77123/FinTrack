@@ -739,3 +739,19 @@
     margin: 0 12px 12px 12px;
   }
 }
+
+/* ── Fee/interest flag ── */
+
+.feeBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--danger);
+  background: var(--danger-light);
+  border-radius: var(--radius-pill);
+  vertical-align: 1px;
+}

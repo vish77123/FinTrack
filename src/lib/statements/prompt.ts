@@ -33,6 +33,7 @@ Extraction rules:
 5. "cardLast4": ONLY the last 4 digits of the card number. AMEX prints 5 visible digits (e.g. "XXXXX 51005") — return the last 4 of those ("1005").
 6. "totalDebits" / "totalCredits": the statement's own printed totals for purchases/debits and payments/credits for THIS period, if present. Do not compute them yourself — copy the printed figure or return null.
 7. "merchant": clean readable payee name (drop trailing city/country codes and reference numbers).
+8. Personal details in the text have been replaced with tokens like [NAME], [ADDRESS], [EMAIL], [PHONE], [PAN], [AADHAAR], [GSTIN], [IFSC], XXXX-XXXX-XXXX-1234 — ignore them; they are never transactions. Masked card forms still end with the real last 4 digits (use them for "cardLast4").
 
 STATEMENT TEXT:
 ${statementText}`;
@@ -133,10 +134,6 @@ export function finalizeStatement(
   return { result: { summary, lines, parsedBy, checksumOk, droppedLines } };
 }
 
-/**
- * Statement text can contain full card/account numbers; mask long digit runs
- * before sending to any LLM. Amounts (with decimals/commas) are untouched.
- */
-export function maskLongNumbers(text: string): string {
-  return text.replace(/\b\d{9,}\b/g, (m) => `XXXX${m.slice(-4)}`);
-}
+// PII masking lives in ./redact.ts (redactStatementText) — applied by the
+// server action before parsing/storage, and again inside each parser as
+// defense in depth.
