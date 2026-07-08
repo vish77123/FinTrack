@@ -37,6 +37,7 @@ function addDays(isoDate: string, days: number): string {
 function revalidateCardViews() {
   revalidatePath("/cards");
   revalidatePath("/cards/[statementId]", "page");
+  revalidatePath("/cards/card/[accountId]", "page");
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
   revalidatePath("/accounts");

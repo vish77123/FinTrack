@@ -629,3 +629,55 @@
   color: var(--danger);
   background: var(--danger-light);
 }
+
+/* ── Card detail page ── */
+
+.detailWrap {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.viewAllLink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 9px 12px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--accent);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.viewAllLink:hover {
+  background: var(--accent-light);
+}
+
+.yearHeader {
+  margin: 14px 0 4px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 16px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.backLink:hover {
+  color: var(--accent);
+}

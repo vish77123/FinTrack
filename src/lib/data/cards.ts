@@ -35,7 +35,47 @@ export interface CreditCardWithStatements {
   last4: string | null;
   hasPassword: boolean;
   statement_password: string | null;
-  statements: CardStatementSummary[];
+  /** Most recent statement only — full history lives on the card page. */
+  latestStatement: CardStatementSummary | null;
+  statementCount: number;
+}
+
+interface RawStatementRow {
+  id: string;
+  account_id: string;
+  statement_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  due_date: string | null;
+  total_due: number | string | null;
+  min_due: number | string | null;
+  checksum_ok: boolean | null;
+  status: string;
+  created_at: string;
+}
+
+function toStatementSummary(s: RawStatementRow, lineStatuses: string[]): CardStatementSummary {
+  const count = (status: string) => lineStatuses.filter((l) => l === status).length;
+  return {
+    id: s.id,
+    statement_date: s.statement_date,
+    period_start: s.period_start,
+    period_end: s.period_end,
+    due_date: s.due_date,
+    total_due: s.total_due !== null ? Number(s.total_due) : null,
+    min_due: s.min_due !== null ? Number(s.min_due) : null,
+    checksum_ok: s.checksum_ok,
+    status: s.status,
+    created_at: s.created_at,
+    lineCounts: {
+      total: lineStatuses.length,
+      matched: count("matched"),
+      newLines: count("new"),
+      ambiguous: count("ambiguous"),
+      ignored: count("ignored"),
+      imported: count("imported"),
+    },
+  };
 }
 
 export interface ContactOption {
@@ -94,7 +134,7 @@ export async function getCardsData(): Promise<CardsData> {
       .eq("user_id", user.id),
     supabase
       .from("card_statements")
-      .select("id, account_id, statement_date, period_start, period_end, due_date, total_due, min_due, checksum_ok, status, created_at, statement_lines(match_status)")
+      .select("id, account_id, statement_date, period_start, period_end, due_date, total_due, min_due, checksum_ok, status, created_at")
       .eq("user_id", user.id)
       .order("statement_date", { ascending: false }),
     supabase
@@ -114,52 +154,114 @@ export async function getCardsData(): Promise<CardsData> {
     if (p.account_last4) last4ByAccount.set(p.account_id, p.account_last4);
   });
 
-  const statementsByAccount = new Map<string, CardStatementSummary[]>();
-  (statements || []).forEach((s) => {
-    const lines = (s.statement_lines as { match_status: string }[] | null) || [];
-    const count = (status: string) => lines.filter((l) => l.match_status === status).length;
-    const summary: CardStatementSummary = {
-      id: s.id,
-      statement_date: s.statement_date,
-      period_start: s.period_start,
-      period_end: s.period_end,
-      due_date: s.due_date,
-      total_due: s.total_due !== null ? Number(s.total_due) : null,
-      min_due: s.min_due !== null ? Number(s.min_due) : null,
-      checksum_ok: s.checksum_ok,
-      status: s.status,
-      created_at: s.created_at,
-      lineCounts: {
-        total: lines.length,
-        matched: count("matched"),
-        newLines: count("new"),
-        ambiguous: count("ambiguous"),
-        ignored: count("ignored"),
-        imported: count("imported"),
-      },
-    };
-    const list = statementsByAccount.get(s.account_id) || [];
-    list.push(summary);
-    statementsByAccount.set(s.account_id, list);
-  });
+  // Latest statement per card (rows are already ordered newest-first).
+  // Line statuses are fetched only for those — the full history is loaded by
+  // the per-card page, so the hub stays cheap however many statements exist.
+  const latestByAccount = new Map<string, RawStatementRow>();
+  const countByAccount = new Map<string, number>();
+  for (const s of (statements || []) as RawStatementRow[]) {
+    countByAccount.set(s.account_id, (countByAccount.get(s.account_id) || 0) + 1);
+    if (!latestByAccount.has(s.account_id)) latestByAccount.set(s.account_id, s);
+  }
+
+  const latestIds = [...latestByAccount.values()].map((s) => s.id);
+  const statusesByStatement = new Map<string, string[]>();
+  if (latestIds.length > 0) {
+    const { data: lineRows } = await supabase
+      .from("statement_lines")
+      .select("statement_id, match_status")
+      .eq("user_id", user.id)
+      .in("statement_id", latestIds);
+    for (const row of lineRows || []) {
+      const list = statusesByStatement.get(row.statement_id) || [];
+      list.push(row.match_status);
+      statusesByStatement.set(row.statement_id, list);
+    }
+  }
 
   return {
-    cards: (cards || []).map((c) => ({
-      id: c.id,
-      name: c.name,
-      color: c.color,
-      icon: c.icon,
-      outstanding_balance: Number(c.outstanding_balance || 0),
-      credit_limit: c.credit_limit !== null ? Number(c.credit_limit) : null,
-      statement_day: c.statement_day,
-      due_day: c.due_day,
-      last4: last4ByAccount.get(c.id) || null,
-      hasPassword: !!c.statement_password,
-      statement_password: c.statement_password,
-      statements: statementsByAccount.get(c.id) || [],
-    })),
+    cards: (cards || []).map((c) => {
+      const latest = latestByAccount.get(c.id);
+      return {
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        icon: c.icon,
+        outstanding_balance: Number(c.outstanding_balance || 0),
+        credit_limit: c.credit_limit !== null ? Number(c.credit_limit) : null,
+        statement_day: c.statement_day,
+        due_day: c.due_day,
+        last4: last4ByAccount.get(c.id) || null,
+        hasPassword: !!c.statement_password,
+        statement_password: c.statement_password,
+        latestStatement: latest ? toStatementSummary(latest, statusesByStatement.get(latest.id) || []) : null,
+        statementCount: countByAccount.get(c.id) || 0,
+      };
+    }),
     contacts: (contacts || []).map((c) => ({ ...c, balance: Number(c.balance || 0) })),
     error: describeQueryError(cardsError) || describeQueryError(statementsError),
+  };
+}
+
+export interface CardDetailData {
+  card: CreditCardWithStatements;
+  /** Full statement history, newest first. */
+  statements: CardStatementSummary[];
+  error: string | null;
+}
+
+export async function getCardDetail(accountId: string): Promise<CardDetailData | null> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  const [{ data: card }, { data: profile }, { data: statements, error: statementsError }] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("id, name, color, icon, outstanding_balance, credit_limit, statement_day, due_day, statement_password")
+      .eq("id", accountId)
+      .eq("user_id", user.id)
+      .eq("type", "credit_card")
+      .maybeSingle(),
+    supabase
+      .from("account_alert_profiles")
+      .select("account_last4")
+      .eq("user_id", user.id)
+      .eq("account_id", accountId)
+      .maybeSingle(),
+    supabase
+      .from("card_statements")
+      .select("id, account_id, statement_date, period_start, period_end, due_date, total_due, min_due, checksum_ok, status, created_at, statement_lines(match_status)")
+      .eq("user_id", user.id)
+      .eq("account_id", accountId)
+      .order("statement_date", { ascending: false }),
+  ]);
+
+  if (!card) return null;
+  if (statementsError) console.error("[CARDS] card statements query failed:", statementsError);
+
+  const summaries = ((statements || []) as (RawStatementRow & { statement_lines: { match_status: string }[] | null })[]).map(
+    (s) => toStatementSummary(s, (s.statement_lines || []).map((l) => l.match_status))
+  );
+
+  return {
+    card: {
+      id: card.id,
+      name: card.name,
+      color: card.color,
+      icon: card.icon,
+      outstanding_balance: Number(card.outstanding_balance || 0),
+      credit_limit: card.credit_limit !== null ? Number(card.credit_limit) : null,
+      statement_day: card.statement_day,
+      due_day: card.due_day,
+      last4: profile?.account_last4?.replace(/\D/g, "").slice(-4) || null,
+      hasPassword: !!card.statement_password,
+      statement_password: card.statement_password,
+      latestStatement: summaries[0] || null,
+      statementCount: summaries.length,
+    },
+    statements: summaries,
+    error: describeQueryError(statementsError),
   };
 }
 
